@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Scrape Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<style>
+:root{--bg:#f5f6fa;--card:#fff;--ink:#141824;--mute:#667085;--line:#e6e8ef;--blue:#1d4ed8;--red:#c0262d;--amber:#b45309;--green:#047857;--soft:#f0f3fa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 Inter,system-ui,sans-serif}
+header{display:flex;align-items:center;gap:14px;padding:14px 24px;background:#0f172a;color:#fff;flex-wrap:wrap}
+header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px}
+header .sub{color:#94a3b8;font-size:12.5px}
+header .sp{flex:1}
+.mode{padding:5px 11px;border-radius:999px;font-weight:600;font-size:12.5px}
+.mode.dry{background:#fef3c7;color:#78350f}.mode.live{background:#d1fae5;color:#064e3b}.mode.paused{background:#e2e8f0;color:#1e293b}.mode.broken{background:#fee2e2;color:#7f1d1d}
+button{font:inherit;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);padding:6px 12px;border-radius:8px;cursor:pointer}
+button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+button.danger{background:#fff;border-color:#f3c2c4;color:var(--red)}
+button:disabled{opacity:.45;cursor:default}
+header button{background:#1e293b;border-color:#334155;color:#fff}
+header button.primary{background:#2563eb;border-color:#2563eb}
+main{max-width:1320px;margin:0 auto;padding:20px 24px 60px;display:grid;gap:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+.card h2{font-size:15px;margin:0 0 12px;font-weight:700}
+.card h2 small{font-weight:500;color:var(--mute);margin-left:6px;font-size:12.5px}
+.banner{border-radius:10px;padding:10px 14px;font-weight:500}
+.banner.red{background:#fde8e8;color:#7f1d1d;border:1px solid #f7caca}
+.banner.amber{background:#fff7e0;color:#78350f;border:1px solid #f6dfa0}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px}
+.kpi .v{font-size:26px;font-weight:700;letter-spacing:-.5px}
+.kpi .l{color:var(--mute);font-size:12.5px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--mute);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.ok{color:var(--green)}.att{color:var(--red)}.muted{color:var(--mute)}
+.small{font-size:12.5px}
+.bar{height:6px;background:var(--soft);border-radius:4px;overflow:hidden;margin-top:5px;width:120px}
+.bar i{display:block;height:100%;background:var(--blue)}
+select,input[type=number],input[type=time],textarea{font:inherit;border:1px solid var(--line);border-radius:7px;padding:5px 8px;background:#fff}
+textarea{width:100%;min-height:150px}
+.grid2{display:grid;grid-template-columns:3fr 2fr;gap:18px}
+.regions{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.region{border:1px solid var(--line);border-radius:10px;padding:12px}
+.region h3{margin:0 0 6px;font-size:14px;display:flex;align-items:center;gap:6px}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0}
+.chip{font-size:11.5px;background:var(--soft);border-radius:999px;padding:2px 8px;cursor:pointer;border:1px solid transparent}
+.chip:hover{border-color:#c7d2fe}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mute);margin-top:8px}
+#map svg{width:100%;height:auto}
+.log{max-height:330px;overflow:auto;font-size:12.5px}
+.log div{padding:4px 0;border-bottom:1px dashed var(--line)}
+.log .warn{color:var(--amber)}.log .alert,.log .error{color:var(--red)}
+.settings{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.field{display:flex;align-items:center;gap:8px;margin:6px 0}
+.field label{min-width:190px;color:var(--mute)}
+.bands label{margin-right:12px;white-space:nowrap}
+.tabs{display:flex;gap:6px;margin-bottom:12px}
+.tabs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+dialog{border:0;border-radius:12px;padding:0;max-width:900px;width:92vw;box-shadow:0 20px 60px #0003}
+dialog .hd{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
+dialog .hd b{flex:1}
+dialog .bd{padding:6px 18px 16px;max-height:70vh;overflow:auto}
+a{color:var(--blue)}
+.st-done{color:var(--green)}.st-pending{color:var(--mute)}.st-running{color:var(--blue);font-weight:600}.st-failed,.st-capped{color:var(--amber)}.st-split,.st-skipped{color:#94a3b8}
+@media(max-width:1000px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2,.settings{grid-template-columns:1fr}.regions{grid-template-columns:repeat(2,1fr)}main{padding:14px 16px 40px}}
+@media(max-width:560px){.regions{grid-template-columns:1fr}.acct-table th:nth-child(5),.acct-table td:nth-child(5){display:none}}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Scrape Desk</h1><div class="sub" id="sub">VICTIG Sales Nav scraping</div></div>
+  <span class="sp"></span>
+  <span id="mode" class="mode"></span>
+  <button id="btnLive" class="primary"></button>
+  <button id="btnPause"></button>
+</header>
+<main>
+  <div id="banners" style="display:grid;gap:8px"></div>
+  <div class="kpis" id="kpis"></div>
+
+  <section class="card">
+    <h2>Accounts <small id="windowNote"></small></h2>
+    <div style="overflow-x:auto"><table class="acct-table" id="accts"></table></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Profiles scraped per day <small>last 30 days, all runs incl. hand-launched</small></h2>
+      <div id="chart"></div>
+    </section>
+    <section class="card">
+      <h2>Activity</h2>
+      <div class="tabs"><button data-t="events" class="on">Log</button><button data-t="runs">Runs</button></div>
+      <div class="log" id="log"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>Coverage <small>counties shaded by region, darker = scraped more recently; grey = no LinkedIn location id yet</small></h2>
+    <div id="map"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <section class="card">
+    <h2>Regions <small>click a state to move it to another region</small></h2>
+    <div class="regions" id="regions"></div>
+  </section>
+
+  <section class="card">
+    <h2>Settings</h2>
+    <div class="settings">
+      <div>
+        <div class="muted small" style="margin-bottom:6px">Job titles (one per line, matched against current title)</div>
+        <textarea id="titles"></textarea>
+        <div class="muted small" style="margin:12px 0 6px">Company headcount</div>
+        <div class="bands" id="bands"></div>
+      </div>
+      <div>
+        <div class="field"><label>Launch window (<span id="tzName"></span>)</label><input type="time" id="ws"> to <input type="time" id="we"></div>
+        <div class="field"><label>Weekdays only</label><input type="checkbox" id="wk"></div>
+        <div class="field"><label>Max launches per account per day</label><input type="number" id="ml" min="1" max="6"></div>
+        <div class="field"><label>Slice size target (results)</label><input type="number" id="tr" min="300" max="2400" step="100"></div>
+        <div class="field"><label>Days before a region can restart</label><input type="number" id="rg" min="0" max="365"></div>
+        <div class="field"><label>DoorDash campaign-10 sync</label><input type="checkbox" id="dd"> <span class="muted small" id="ddNote"></span></div>
+        <div style="margin-top:14px;display:flex;gap:8px;align-items:center"><button class="primary" id="saveSettings">Save settings</button><span class="muted small" id="saveNote"></span></div>
+        <div class="muted small" style="margin-top:10px" id="calNote"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog id="dlg"><div class="hd"><b id="dlgTitle"></b><button onclick="dlg.close()">Close</button></div><div class="bd" id="dlgBody"></div></dialog>
+
+<script>
+const BANDS={B:"1-10",C:"11-50",D:"51-200",E:"201-500",F:"501-1,000",G:"1,001-5,000",H:"5,001-10,000",I:"10,001+"};
+const ACOL={max:"#2563eb",blake:"#7c3aed",derek:"#d97706",dustin:"#059669",brent:"#dc2626",morgan:"#0891b2",stephen:"#64748b"};
+let S=null, logTab="events", mapDrawn=false, topo=null;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt=n=>(n??0).toLocaleString();
+const ago=iso=>{if(!iso)return "never";const m=(Date.now()-new Date(iso))/6e4;if(m<60)return Math.round(m)+"m ago";if(m<1440)return Math.round(m/60)+"h ago";return Math.round(m/1440)+"d ago"};
+const tLocal=iso=>iso?new Date(iso).toLocaleString([], {weekday:"short",hour:"numeric",minute:"2-digit"}):"";
+async function api(path,body){const r=await fetch(path,{method:body===undefined?"GET":"POST",headers:{"content-type":"application/json","x-desk":"1"},body:body===undefined?undefined:JSON.stringify(body)});
+  if(r.status===401){location.href="/login";return}const j=await r.json();if(!r.ok){alert(j.error||r.status);throw j}return j}
+
+async function load(){S=await api("/api/state");render()}
+function render(){
+  const s=S.settings, br=S.breaker;
+  const mode=br?["broken","Stopped: breaker tripped"]:s.paused?["paused","Paused"]:s.dry_run?["dry","Dry run: nothing launches"]:["live","Live"];
+  $("mode").className="mode "+mode[0];$("mode").textContent=mode[1];
+  $("btnLive").textContent=s.dry_run?"Go live":"Back to dry run";$("btnLive").className=s.dry_run?"primary":"";
+  $("btnPause").textContent=s.paused?"Resume":"Pause";
+  $("sub").textContent=`Signed in as ${S.user} · scheduler ${S.heartbeat?"beat "+ago(S.heartbeat):"not running"}`;
+  // banners
+  const b=[];
+  if(br)b.push(`<div class="banner red">All launches stopped: ${esc(br.reason)} <button class="danger" onclick="act('/api/breaker/reset',{})">Reset</button></div>`);
+  if(!S.pb_key)b.push(`<div class="banner amber">No PhantomBuster API key yet (PB_API_KEY). The desk can plan but can't launch or read runs.</div>`);
+  for(const [k,a] of Object.entries(S.alerts||{}))if(k!=="breaker")b.push(`<div class="banner red">${esc(a.text)}</div>`);
+  if(S.pb_storage_full)b.push(`<div class="banner amber">PhantomBuster's 100,000-lead storage is full (seen ${ago(S.pb_storage_full)}). Runs still save their CSV, but clear old leads in PhantomBuster → Leads when you can.</div>`);
+  $("banners").innerHTML=b.join("");
+  // kpis
+  const days=Object.keys(S.daily).sort(), today=S.now_local.slice(0,10);
+  const sumDay=d=>Object.values(S.daily[d]||{}).reduce((a,b)=>a+b,0);
+  const wk=days.filter(d=>(new Date(today)-new Date(d))/864e5<7).reduce((a,d)=>a+sumDay(d),0);
+  const en=S.accounts.filter(a=>a.enabled), healthy=en.filter(a=>a.status==="ok").length;
+  let tot=0,dn=0;for(const r of S.regions){const sl=r.slices;const all=Object.values(sl).reduce((a,b)=>a+b,0);tot+=all;dn+=(sl.done||0)+(sl.capped||0)+(sl.split||0)}
+  $("kpis").innerHTML=[[fmt(sumDay(today)),"Profiles scraped today"],[fmt(wk),"Last 7 days"],[`${healthy} / ${en.length}`,"Accounts healthy"],[tot?Math.round(dn/tot*100)+"%":"–","Of this cycle's slices done"]]
+    .map(([v,l])=>`<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+  $("windowNote").textContent=`${S.in_window?"in":"outside"} launch window (${s.window_start}–${s.window_end} ${S.tz.split("/")[1].replace("_"," ")} time${s.weekdays_only?", weekdays":""})`;
+  renderAccounts();renderChart();renderLog();renderRegions();renderSettings();drawMap();
+}
+function regionName(id){const r=S.regions.find(r=>r.id===id);return r?r.name:"–"}
+function renderAccounts(){
+  const rows=S.accounts.map(a=>{
+    const st=!a.enabled?`<span class="muted">Off</span>`:a.status==="ok"?`<span class="ok"><span class="dot" style="background:var(--green)"></span>OK</span>`:`<span class="att"><span class="dot" style="background:var(--red)"></span>Needs attention</span><div class="small att">${esc(a.status_note)}</div>`;
+    const pct=Math.min(100,Math.round(a.today_got/a.daily_budget*100));
+    const run=a.running?`<div class="small" style="color:var(--blue)">Running since ${tLocal(a.running.launched_at)}</div>`:"";
+    const nx=a.next?`<div>${esc(a.next.counties.slice(0,3).join("; "))}${a.next.counties.length>3?` <span class="muted">+${a.next.counties.length-3} more</span>`:""}</div>
+      <div class="small muted">${a.next.bands.map(b=>BANDS[b]).join(", ")} · est ${fmt(a.next.est)} · <a href="${esc(a.next.url)}" target="_blank" rel="noopener">open search</a></div>`:`<span class="muted">${a.region_id?"region finished, waiting to restart":"no region"}</span>`;
+    const regSel=`<select onchange="act('/api/accounts/${a.key}',{region_id:+this.value||null})"><option value="">–</option>${S.regions.map(r=>`<option value="${r.id}" ${r.id===a.region_id?"selected":""}>${esc(r.name)}</option>`).join("")}</select>`;
+    const acts=[`<button onclick="act('/api/accounts/${a.key}',{enabled:${!a.enabled}})">${a.enabled?"Turn off":"Turn on"}</button>`];
+    if(a.enabled&&a.status!=="ok")acts.push(`<button onclick="act('/api/accounts/${a.key}',{clear_attention:true})">Mark fixed</button>`);
+    if(a.enabled&&a.next)acts.push(`<button ${S.settings.dry_run||a.running?"disabled":""} title="${S.settings.dry_run?"Turn dry run off first":"Launch the next slice now"}" onclick="if(confirm('Launch ${esc(a.name)}\\'s next slice now?'))act('/api/accounts/${a.key}/launch-now',{})">Launch now</button>`);
+    return `<tr><td><span class="dot" style="background:${ACOL[a.key]||"#999"}"></span><b>${esc(a.name)}</b><div class="small muted">last scrape ${ago(a.last_scrape)}</div></td>
+      <td>${regSel}</td><td>${st}${run}</td>
+      <td>${fmt(a.today_got)} <span class="muted small">/ ${fmt(a.daily_budget)}</span><div class="bar"><i style="width:${pct}%"></i></div><div class="small muted">${a.today_runs} run${a.today_runs===1?"":"s"} today</div></td>
+      <td style="max-width:380px">${nx}</td><td style="white-space:nowrap">${acts.join(" ")}</td></tr>`}).join("");
+  $("accts").innerHTML=`<tr><th>Account</th><th>Region</th><th>Status</th><th>Today</th><th>Next slice</th><th></th></tr>${rows}`;
+}
+function renderChart(){
+  const keys=S.accounts.map(a=>a.key), days=[];
+  for(let i=29;i>=0;i--){const d=new Date(S.now_local.slice(0,10)+"T12:00:00");d.setDate(d.getDate()-i);days.push(d.toISOString().slice(0,10))}
+  const W=$("chart").clientWidth||700,H=220,pl=40,pb=24,bw=(W-pl)/days.length;
+  const tot=d=>keys.reduce((a,k)=>a+((S.daily[d]||{})[k]||0),0);
+  const step=[1000,2000,2500,5000,10000].find(s=>s*4>=Math.max(1000,...days.map(tot)))||20000, mx=step*4, y=v=>H-pb-(v/mx)*(H-pb-8);
+  let svg=`<svg width="${W}" height="${H}" role="img" aria-label="profiles per day">`;
+  for(let v=0;v<=mx;v+=step){svg+=`<line x1="${pl}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#eef0f5"/><text x="${pl-6}" y="${y(v)+4}" text-anchor="end" font-size="10.5" fill="#667085">${v/1000}k</text>`}
+  days.forEach((d,i)=>{let acc=0;const x=pl+i*bw+2;const wd=new Date(d+"T12:00:00").getDay();
+    for(const k of keys){const v=(S.daily[d]||{})[k]||0;if(!v)continue;svg+=`<rect x="${x}" y="${y(acc+v)}" width="${bw-4}" height="${y(acc)-y(acc+v)}" fill="${ACOL[k]}"><title>${d} ${k}: ${fmt(v)}</title></rect>`;acc+=v}
+    if(!acc&&wd>0&&wd<6&&d<S.now_local.slice(0,10))svg+=`<text x="${x+bw/2-2}" y="${H-pb-4}" text-anchor="middle" font-size="10" fill="#c0262d">0</text>`;
+    if(i%5===0||i===days.length-1)svg+=`<text x="${x+bw/2-2}" y="${H-6}" text-anchor="middle" font-size="10.5" fill="#667085">${d.slice(5).replace("-","/")}</text>`});
+  svg+="</svg>";
+  $("chart").innerHTML=svg+`<div class="legend">${S.accounts.filter(a=>a.enabled||Object.values(S.daily).some(d=>d[a.key])).map(a=>`<span><span class="dot" style="background:${ACOL[a.key]}"></span>${esc(a.name)}</span>`).join("")}<span><b style="color:#c0262d">0</b> = weekday with no scraping</span></div>`;
+}
+function renderLog(){
+  document.querySelectorAll(".tabs button").forEach(b=>b.classList.toggle("on",b.dataset.t===logTab));
+  if(logTab==="events")$("log").innerHTML=S.events.map(e=>`<div class="${e.level}"><span class="muted">${tLocal(e.ts)}</span> ${esc(e.text)}</div>`).join("")||"<div class=muted>Nothing yet.</div>";
+  else $("log").innerHTML=`<table><tr><th>When</th><th>Account</th><th>Got</th><th>Of</th><th>Result</th></tr>${S.runs.map(r=>`<tr><td class="small">${tLocal(r.launched_at)}${r.source==="history"?' <span class="muted">(hand)</span>':""}</td><td>${esc(r.name||r.account_key)}</td><td>${fmt(r.got)}</td><td class="muted">${r.total==null?"":fmt(r.total)}</td><td class="small ${r.status==="failed"?"att":""}">${esc(r.status)}${r.errors.length?" · "+esc(r.errors[0]).slice(0,80):""}</td></tr>`).join("")}</table>`;
+}
+document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{logTab=b.dataset.t;renderLog()});
+function renderRegions(){
+  $("regions").innerHTML=S.regions.map(r=>{const sl=r.slices,all=Object.values(sl).reduce((a,b)=>a+b,0),done=(sl.done||0)+(sl.capped||0)+(sl.split||0);
+    const who=S.accounts.filter(a=>a.region_id===r.id&&a.enabled).map(a=>a.name.split(" ")[0]).join(", ")||"<span class=att>no account</span>";
+    return `<div class="region"><h3><span class="dot" style="background:${r.color}"></span>${esc(r.name)}</h3>
+      <div class="small">${who} · cycle ${r.cycle}</div>
+      <div class="small muted">${fmt(r.counties)} counties · ${(r.population/1e6).toFixed(1)}M people${r.counties_without_id?` · <span title="LinkedIn location ids still being looked up">${r.counties_without_id} awaiting ids</span>`:""}</div>
+      <div class="bar" style="width:100%"><i style="width:${all?done/all*100:0}%;background:${r.color}"></i></div>
+      <div class="small muted">${done} of ${all} slices · ${fmt(r.profiles_cycle)} profiles this cycle${(sl.failed||0)?` · <span class=att>${sl.failed} failed</span>`:""}</div>
+      <div class="chips">${r.states.map(st=>`<span class="chip" onclick="moveState('${esc(st)}',${r.id})">${esc(st)}</span>`).join("")}</div>
+      <button onclick="showSlices(${r.id})">Queue</button> <button class="danger" onclick="if(confirm('Start ${esc(r.name)} over from the top now?'))act('/api/regions/${r.id}/restart',{})">Restart</button></div>`}).join("");
+}
+function moveState(st,from){
+  const opts=S.regions.filter(r=>r.id!==from).map(r=>`${r.id} = ${r.name}`).join("\n");
+  const v=prompt(`Move ${st} to which region?\n${opts}`);if(!v)return;
+  act("/api/states/move",{state:st,region_id:+v});
+}
+async function showSlices(rid){
+  const rows=await api(`/api/regions/${rid}/slices`), r=S.regions.find(x=>x.id===rid);
+  $("dlgTitle").textContent=`${r.name}: cycle ${r.cycle} queue (${rows.length} slices)`;
+  $("dlgBody").innerHTML=`<table><tr><th>#</th><th>Counties</th><th>Headcount</th><th>Est</th><th>Status</th><th>Got / of</th><th></th></tr>${rows.map(x=>`<tr>
+    <td class="muted">${x.id}</td><td class="small">${esc(x.county_names.slice(0,4).join("; "))}${x.county_names.length>4?` <span class=muted>+${x.county_names.length-4}</span>`:""}</td>
+    <td class="small">${x.bands.map(b=>BANDS[b]).join(", ")}</td><td>${fmt(x.est)}</td><td class="st-${x.status}">${x.status}${x.note?`<div class="small muted">${esc(x.note).slice(0,90)}</div>`:""}</td>
+    <td class="small">${x.got==null?"":fmt(x.got)+" / "+fmt(x.total)}</td>
+    <td style="white-space:nowrap">${x.status==="pending"?`<button onclick="sliceAct(${x.id},'first',${rid})">Next</button> <button onclick="sliceAct(${x.id},'skip',${rid})">Skip</button>`:["failed","skipped"].includes(x.status)?`<button onclick="sliceAct(${x.id},'requeue',${rid})">Requeue</button>`:""}</td></tr>`).join("")}</table>`;
+  if(!dlg.open)dlg.showModal();
+}
+async function sliceAct(id,a,rid){await api(`/api/slices/${id}/${a}`,{});await load();showSlices(rid)}
+function renderSettings(){
+  if(document.activeElement&&document.activeElement.closest&&document.activeElement.closest(".settings"))return;
+  const s=S.settings;$("titles").value=s.titles.join("\n");$("tzName").textContent=S.tz;
+  $("bands").innerHTML=Object.entries(BANDS).map(([k,v])=>`<label><input type="checkbox" value="${k}" ${s.bands.includes(k)?"checked":""}> ${v}</label>`).join("");
+  $("ws").value=s.window_start;$("we").value=s.window_end;$("wk").checked=s.weekdays_only;$("ml").value=s.max_launches_per_day;$("tr").value=s.target_results;$("rg").value=s.regap_days;$("dd").checked=s.doordash_sync;
+  const dd=S.doordash;$("ddNote").textContent=!dd.key?"needs BISON_KEY_VICTIG":dd.last?`last run ${ago(dd.last.at)} (exit ${dd.last.code})`:"never run here";
+  const c=S.calibration;$("calNote").textContent=c?`Slice sizes are estimated from ${c.runs} past runs (typical miss ${Math.round(c.median_abs_error*100)}%) and corrected after every run.`:"";
+}
+$("saveSettings").onclick=async()=>{
+  const p={titles:$("titles").value.split("\n"),bands:[...document.querySelectorAll("#bands input:checked")].map(i=>i.value),window_start:$("ws").value,window_end:$("we").value,
+    weekdays_only:$("wk").checked,max_launches_per_day:+$("ml").value,target_results:+$("tr").value,regap_days:+$("rg").value,doordash_sync:$("dd").checked};
+  if(p.doordash_sync&&!S.settings.doordash_sync&&!confirm("Turn on the DoorDash sync here? Turn off the doordash-lead-sync task on Derek's PC at the same time so they don't both run."))return;
+  await api("/api/settings",p);$("saveNote").textContent="Saved";setTimeout(()=>$("saveNote").textContent="",2500);document.activeElement.blur();load();
+};
+$("btnLive").onclick=()=>{const s=S.settings;if(s.dry_run&&!confirm("Go live? Accounts will start launching scrapes in their window."))return;act("/api/settings",{dry_run:!s.dry_run})};
+$("btnPause").onclick=()=>act("/api/settings",{paused:!S.settings.paused});
+async function act(p,b){await api(p,b);load()}
+
+async function drawMap(){
+  if(!window.d3||!window.topojson)return;
+  if(!topo){try{topo=await (await fetch("https://cdn.jsdelivr.net/npm/us-atlas@3.0.1/counties-albers-10m.json")).json()}catch(e){$("map").textContent="Map couldn't load.";return}}
+  const cov=await api("/api/coverage");
+  const W=975,H=610,path=d3.geoPath();
+  const colors=Object.fromEntries(S.regions.map(r=>[r.id,r.color]));
+  const fill=f=>{const c=cov[f.id];if(!c||!c[0])return "#f1f3f7";if(!c[2])return "#d4d7de";const days=c[1];const base=d3.color(colors[c[0]]);
+    const op=days==null?.13:days<14?.95:days<45?.7:days<120?.45:.25;base.opacity=op;return base.formatRgb()};
+  if(!mapDrawn){$("map").innerHTML=`<svg viewBox="0 0 ${W} ${H}"><g id="cty"></g><path id="sts" fill="none" stroke="#fff" stroke-width="1"></path></svg>`;mapDrawn=true;
+    d3.select("#cty").selectAll("path").data(topojson.feature(topo,topo.objects.counties).features).join("path").attr("d",path).attr("stroke","#fff").attr("stroke-width",.2).append("title");
+    d3.select("#sts").attr("d",path(topojson.mesh(topo,topo.objects.states,(a,b)=>a!==b)))}
+  d3.select("#cty").selectAll("path").attr("fill",fill).select("title").text(f=>{const c=cov[f.id];return `${f.properties.name}: ${!c?"":c[1]==null?"not scraped yet":"scraped "+c[1]+" days ago"}`});
+  $("legend").innerHTML=S.regions.map(r=>`<span><span class="dot" style="background:${r.color}"></span>${esc(r.name)}</span>`).join("")+`<span>pale = not scraped this cycle · solid = last 2 weeks</span>`;
+}
+load();setInterval(()=>{if(!dlg.open)load()},30000);
+</script>
+</body>
+</html>

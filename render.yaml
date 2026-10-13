@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: victig-scrape-desk
+    runtime: docker
+    plan: starter            # always on: the scheduler lives in this process
+    region: ohio
+    healthCheckPath: /healthz
+    disk:
+      name: desk-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: APP_TZ
+        value: America/New_York
+      - key: ALLOWED_DOMAIN
+        value: victig.com
+      - key: PB_ORG_ID
+        value: "3152587389729387"
+      - key: SESSION_SECRET
+        generateValue: true
+      # Set these in the Render dashboard; never commit them.
+      - key: PUBLIC_URL
+        sync: false
+      - key: PB_API_KEY
+        sync: false
+      - key: SLACK_ALERT_WEBHOOK
+        sync: false
+      - key: DESK_PASSWORD
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: BISON_KEY_VICTIG
+        sync: false
