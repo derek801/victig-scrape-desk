@@ -41,7 +41,7 @@ DEFAULT_SETTINGS = {
                "Recruiting", "Recruitment", "People Operations", "Chief People Officer", "People and Culture",
                "HR Generalist", "HR Business Partner"],
     "bands": ["D", "E", "F", "G", "H", "I"],   # 51+ employees
-    "target_results": 1800,       # aim each slice under Sales Nav's 2,500-result ceiling
+    "target_results": 2200,       # aim each slice under Sales Nav's 2,500-result ceiling (buffer for estimate error)
     "max_counties_per_slice": 60,
     "window_start": "09:00",      # local launch window (APP_TZ)
     "window_end": "15:30",

@@ -9,7 +9,7 @@ writes that search into the account's phantom and launches it through the Phanto
 run ends, the desk reads the run log:
 
 - under 2,500 results → slice done
-- over 2,500 → slice split in two (fewer bands, then fewer counties) and both halves go next in line
+- over 2,500 → slice split in two (fewer counties first; a single county is split by headcount band) and both halves go next in line
 - one county + one band still over 2,500 → marked *capped* (Sales Nav can't show more)
 
 When a region runs out of slices it starts over from the top, once its last cycle is at least

@@ -113,8 +113,30 @@ def counties_for(slice_row):
     return [rows[f] for f in fips if f in rows]
 
 
+def _split_counties(fips, pops):
+    """Two county groups of similar population (biggest first onto the lighter side)."""
+    a, b, wa, wb = [], [], 0, 0
+    for f in sorted(fips, key=lambda f: -pops.get(f, 0)):
+        if wa <= wb:
+            a.append(f)
+            wa += pops.get(f, 0)
+        else:
+            b.append(f)
+            wb += pops.get(f, 0)
+    return [a, b]
+
+
+def _split_bands(bands):
+    """Two consecutive band groups with the most even expected result counts."""
+    d = densities()
+    tot = sum(d[x] for x in bands)
+    best = min(range(1, len(bands)), key=lambda i: abs(2 * sum(d[x] for x in bands[:i]) - tot))
+    return [bands[:best], bands[best:]]
+
+
 def record_result(slice_row, total, got):
-    """Close a slice after a successful run. Overflow -> split into two children placed next in line."""
+    """Close a slice after a successful run. Overflow -> split into two children placed next in line
+    (fewer counties first; a single county is split by headcount band)."""
     sid, rid = slice_row["id"], slice_row["region_id"]
     fips, bands = json.loads(slice_row["counties"]), json.loads(slice_row["bands"])
     pop = sum(c["population"] for c in counties_for(slice_row))
@@ -123,10 +145,16 @@ def record_result(slice_row, total, got):
     if total is None or total <= SN_CAP:
         store.x("UPDATE slices SET status='done',total=?,got=?,finished_at=? WHERE id=?", (total, got, store.iso(), sid))
         return "done"
-    if len(bands) > 1:
-        halves = [(fips, bands[:len(bands) // 2]), (fips, bands[len(bands) // 2:])]
-    elif len(fips) > 1:
-        halves = [(fips[:len(fips) // 2], bands), (fips[len(fips) // 2:], bands)]
+    # Shed counties first; only a single county gets broken up by headcount band.
+    cs = counties_for(slice_row)
+    if len(fips) > 1:
+        pops = {c["fips"]: c["population"] for c in cs}
+        halves = [(g, bands, sum(pops.get(f, 0) for f in g) or 1) for g in _split_counties(fips, pops)]
+        whole = sum(h[2] for h in halves)
+    elif len(bands) > 1:
+        d = densities()
+        halves = [(fips, g, sum(d[b] for b in g)) for g in _split_bands(bands)]
+        whole = sum(h[2] for h in halves)
     else:
         store.x("UPDATE slices SET status='capped',total=?,got=?,finished_at=?,note=? WHERE id=?",
                 (total, got, store.iso(), f"single county+band has {total} results; Sales Nav shows 2,500", sid))
@@ -136,10 +164,10 @@ def record_result(slice_row, total, got):
                    (rid, slice_row["cycle"]))["m"]
     lo = slice_row["seq"]
     hi = nxt if nxt is not None else lo + 1
-    for i, (f, b) in enumerate(halves):
+    for i, (f, b, w) in enumerate(halves):
         store.x("INSERT INTO slices(region_id,cycle,seq,counties,bands,est,status,parent_id) VALUES(?,?,?,?,?,?, 'pending', ?)",
                 (rid, slice_row["cycle"], lo + (hi - lo) * (i + 1) / 3, json.dumps(f), json.dumps(b),
-                 int(total * len(b) / len(bands) * len(f) / len(fips)), sid))
+                 int(total * w / whole), sid))
     return "split"
 
 
