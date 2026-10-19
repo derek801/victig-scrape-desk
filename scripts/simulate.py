@@ -105,6 +105,19 @@ for a in store.q("SELECT * FROM accounts WHERE enabled=1"):
     if parent["status"] == "split":
         check(nxt["parent_id"] == parent["id"], f"{a['key']}: next slice is a child of the split one")
 
+for parent in [s for s in split if s["status"] == "split"]:
+    ch = [k for k in kids if k["parent_id"] == parent["id"]]
+    pc, pb_ = json.loads(parent["counties"]), json.loads(parent["bands"])
+    cc = [json.loads(k["counties"]) for k in ch]
+    cb = [json.loads(k["bands"]) for k in ch]
+    check(len(ch) == 2, f"slice {parent['id']} split into two children")
+    if len(pc) > 1:
+        check(all(b == pb_ for b in cb) and sorted(sum(cc, [])) == sorted(pc) and all(cc),
+              f"slice {parent['id']}: multi-county overflow splits counties, keeps bands")
+    else:
+        check(all(c == pc for c in cc) and sum(cb, []) == pb_ and all(cb),
+              f"slice {parent['id']}: single-county overflow splits headcount bands")
+
 # 4. daily budget: with 2,000/day and ~4,000 already scraped, nothing more launches
 store.x("UPDATE accounts SET daily_budget=2000")
 force_due()
