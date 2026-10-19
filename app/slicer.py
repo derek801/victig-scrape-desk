@@ -73,9 +73,9 @@ def build_cycle(region_id, cycle):
         cur, cur_pop = [], 0
 
     for r in rows:
-        if (r["state"], (r["last_scraped"] or "") > recent) != cur_state:
+        if ((r["last_scraped"] or "") > recent) != cur_state:   # slices may span state borders; recent ones stay apart
             flush()
-            cur_state = (r["state"], (r["last_scraped"] or "") > recent)
+            cur_state = (r["last_scraped"] or "") > recent
         left = [b for b in bands if b not in covered.get(r["fips"], ())]
         if not left:
             continue
