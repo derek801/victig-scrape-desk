@@ -127,6 +127,11 @@ def healthz():
     return {"ok": True, "heartbeat": hb}
 
 
+@app.get("/favicon.png")
+def favicon():
+    return FileResponse(STATIC / "favicon.png", headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/")
 def index(request: Request):
     if not user(request):
