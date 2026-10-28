@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS runs (
   errors TEXT, source TEXT DEFAULT 'desk');
 CREATE INDEX IF NOT EXISTS runs_acct ON runs(account_key, launched_at);
 CREATE UNIQUE INDEX IF NOT EXISTS runs_container ON runs(container_id);
+CREATE TABLE IF NOT EXISTS county_ratio (
+  fips TEXT, band TEXT, ratio REAL, PRIMARY KEY (fips, band));
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, ts TEXT, level TEXT, text TEXT);
 """
 

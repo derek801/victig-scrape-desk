@@ -63,6 +63,9 @@ def force_due():
     store.x("UPDATE accounts SET next_launch_at=?", (store.iso(store.now() - dt.timedelta(minutes=1)),))
 
 
+SN = slicer.SN_CAP
+
+
 def check(cond, msg):
     print(("PASS " if cond else "FAIL ") + msg)
     if not cond:
@@ -170,4 +173,18 @@ force_due()
 before = len(store.q("SELECT * FROM runs"))
 runner.tick()
 check(len(store.q("SELECT * FROM runs")) == before, "dry run: nothing launched")
+
+# 10. learning + launch guard: a county measured big is re-estimated big; an over-cap slice is split before launch
+slicer.build_cycle(rid, 2)
+sl = slicer.next_slice(rid)
+fips0 = json.loads(sl["counties"])
+pops = {c["fips"]: c["population"] for c in slicer.counties_for(sl)}
+slicer._learn_counties(slicer.counties_for(sl), json.loads(sl["bands"]), 40 * SN)
+check(slicer.current_est(sl) > SN * 2, "measured county ratio raises the slice estimate")
+ready = slicer.next_ready(rid)
+if len(fips0) > 1 or len(json.loads(sl["bands"])) > 1:
+    check(ready["id"] != sl["id"] and store.q1("SELECT status FROM slices WHERE id=?", (sl["id"],))["status"] == "split",
+          "over-cap slice split before launch")
+    check(ready["parent_id"] is not None and (ready["est"] <= SN or (len(json.loads(ready["counties"])) == 1
+          and len(json.loads(ready["bands"])) == 1)), "what launches next is a descendant, under the cap")
 print("all checks passed")
