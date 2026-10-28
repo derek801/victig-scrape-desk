@@ -195,7 +195,7 @@ def plan_for(acct):
     """What this account would launch next: (slice, url, counties) or None."""
     if not acct["region_id"]:
         return None
-    sl = slicer.next_slice(acct["region_id"])
+    sl = slicer.next_ready(acct["region_id"])
     if not sl:
         return None
     cs = slicer.counties_for(sl)
