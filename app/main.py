@@ -112,7 +112,7 @@ def logout(request: Request):
 
 
 LOGIN_FORM = """<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Scrape Desk</title><style>body{font:15px system-ui;display:grid;place-items:center;height:100vh;margin:0;background:#f4f6fb}
+<title>Scrape Desk</title><link rel="icon" type="image/png" href="/favicon.png"><style>body{font:15px system-ui;display:grid;place-items:center;height:100vh;margin:0;background:#f4f6fb}
 form{background:#fff;padding:28px;border-radius:12px;box-shadow:0 2px 12px #0001;display:grid;gap:12px;width:260px}
 input,button{font:inherit;padding:9px 11px;border-radius:8px;border:1px solid #ccd}button{background:#1d4ed8;color:#fff;border:0}
 .err{color:#b91c1c;margin:0}</style><form method=post action=/login><b>Scrape Desk</b><!--err-->
