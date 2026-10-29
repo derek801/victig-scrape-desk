@@ -98,6 +98,7 @@ def parse_output(text):
         "errors": real,
         "login_problem": bool(login),
         "storage_full": any(p in e for e in errs for p in IGNORE_PATTERNS),
+        "already_processed": "This search has already been processed" in text and not got,
         "saved": "Data successfully saved" in text or "CSV saved at" in text,
         "url": url.group(0) if url else None,
     }

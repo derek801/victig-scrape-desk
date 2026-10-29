@@ -163,7 +163,12 @@ def finish(run, c):
              run["id"]))
     if p["storage_full"]:
         store.kv_set("pb_storage_full", store.iso())
-    if ok:
+    if exit_code == 0 and p["already_processed"] and not p["login_problem"]:
+        store.x("UPDATE runs SET status='finished' WHERE id=?", (run["id"],))
+        slicer.record_skipped(sl)
+        store.log(f"{acct['name']}: slice {sl['id']} was already processed by PhantomBuster, marked done")
+        set_ok(acct)
+    elif ok:
         res = slicer.record_result(sl, p["total"], p["got"])
         store.log(f"{acct['name']}: slice {sl['id']} {res}, {p['got']:,} profiles of {p['total'] or 0:,}")
         set_ok(acct)
