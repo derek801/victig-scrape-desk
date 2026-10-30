@@ -175,6 +175,16 @@ def record_result(slice_row, total, got):
     return "split"
 
 
+def record_skipped(slice_row):
+    """PhantomBuster refused the search because it already ran it ("This search has already been processed").
+    Those people were scraped before, so close the slice as done and move the counties' last-scraped date."""
+    fips = json.loads(slice_row["counties"])
+    store.x("UPDATE counties SET last_scraped=MAX(COALESCE(last_scraped,''), ?) WHERE fips IN (%s)"
+            % ",".join("?" * len(fips)), [store.iso()] + fips)
+    store.x("UPDATE slices SET status='done',got=0,finished_at=?,note=? WHERE id=?",
+            (store.iso(), "PhantomBuster had already processed this search", slice_row["id"]))
+
+
 def _halves(slice_row):
     """Two smaller slices to replace this one, as (counties, bands, weight), or None if it can't shrink.
     Shed counties first; only a single county gets broken up by headcount band."""

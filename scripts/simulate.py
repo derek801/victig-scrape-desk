@@ -38,6 +38,8 @@ def fake_output(cid):
     c = STATE["containers"][cid]
     if c.get("login"):
         return "[error]❌ Session cookie not valid anymore. Please log in to LinkedIn to get a new one.\n"
+    if c.get("already"):
+        return f"{c['url']}\n[info_]ℹ️ This search has already been processed.\n"
     total = c.get("total", 1500)
     got = min(total, 2500)
     return (f"{c['url']}\n[info_]ℹ️ Total results count: {total}.\n[done_]✅ Got 25 leads from page 1. ({got} this launch)\n"
@@ -187,4 +189,19 @@ if len(fips0) > 1 or len(json.loads(sl["bands"])) > 1:
           "over-cap slice split before launch")
     check(ready["parent_id"] is not None and (ready["est"] <= SN or (len(json.loads(ready["counties"])) == 1
           and len(json.loads(ready["bands"])) == 1)), "what launches next is a descendant, under the cap")
+
+# 11. PhantomBuster refuses an already-processed search: slice done, account stays healthy
+runner.reset_breaker()
+store.save_settings({"dry_run": False})
+store.x("UPDATE accounts SET status='ok', fail_streak=0")
+store.x("DELETE FROM runs WHERE source='desk'")
+force_due()
+runner.tick()
+r = store.q1("SELECT * FROM runs WHERE status='launched' ORDER BY id LIMIT 1")
+STATE["containers"][r["container_id"]]["already"] = True
+finish_all()
+runner.tick()
+a = store.q1("SELECT * FROM accounts WHERE key=?", (r["account_key"],))
+check(a["status"] == "ok" and a["fail_streak"] == 0, "already-processed run does not fail the account")
+check(store.q1("SELECT status FROM slices WHERE id=?", (r["slice_id"],))["status"] == "done", "already-processed slice closed as done")
 print("all checks passed")
