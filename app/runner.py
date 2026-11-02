@@ -53,11 +53,14 @@ def sync_hand_runs():
     if last and store.now() - dt.datetime.fromisoformat(last) < dt.timedelta(minutes=15):
         return
     store.kv_set("hand_sync_at", store.iso())
+    # First pass on a fresh database: whatever PhantomBuster already holds is history, not "new hand launches".
+    backfill = not store.kv_get("runs_backfilled")
+    added = 0
     known = {r["container_id"] for r in store.q("SELECT container_id FROM runs")}
     by_geo = {r["geo_id"]: r["fips"] for r in store.q("SELECT geo_id, fips FROM counties WHERE geo_id NOT IN ('', 'NONE')")}
     for a in store.q("SELECT * FROM accounts WHERE agent_id IS NOT NULL"):
         try:
-            cs = pb.containers(a["agent_id"], limit=10)
+            cs = pb.containers(a["agent_id"], limit=50 if backfill else 10)
         except pb.PBError:
             return
         for c in cs:
@@ -67,15 +70,20 @@ def sync_hand_runs():
             p = pb.parse_output(pb.output(cid))
             launched = dt.datetime.fromtimestamp(c["createdAt"] / 1000, dt.timezone.utc)
             store.x("INSERT OR IGNORE INTO runs(account_key,container_id,url,launched_at,finished_at,status,exit_code,"
-                    "total,got,errors,source) VALUES(?,?,?,?,?,?,?,?,?,?,'hand')",
+                    "total,got,errors,source) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                     (a["key"], cid, p["url"], store.iso(launched), store.iso(), "finished" if c.get("exitCode") == 0 else "failed",
-                     c.get("exitCode"), p["total"], p["got"], json.dumps(p["errors"])))
+                     c.get("exitCode"), p["total"], p["got"], json.dumps(p["errors"]), "history" if backfill else "hand"))
             if p["url"] and p["got"]:
                 fips = [by_geo[g] for g, _ in searchurl.parse(p["url"])["regions"] if g in by_geo]
                 if fips:
                     store.x("UPDATE counties SET last_scraped=MAX(COALESCE(last_scraped,''), ?) WHERE fips IN (%s)"
                             % ",".join("?" * len(fips)), [store.iso(launched)] + fips)
-            store.log(f"{a['name']}: hand-launched run recorded ({p['got']:,} profiles)")
+            added += 1
+            if not backfill:
+                store.log(f"{a['name']}: hand-launched run recorded ({p['got']:,} profiles)")
+    if backfill:
+        store.kv_set("runs_backfilled", store.iso())
+        store.log(f"first sync: {added} past PhantomBuster runs loaded as history")
 
 
 # ---- breaker -----------------------------------------------------------------------------------
