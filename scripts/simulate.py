@@ -204,4 +204,23 @@ runner.tick()
 a = store.q1("SELECT * FROM accounts WHERE key=?", (r["account_key"],))
 check(a["status"] == "ok" and a["fail_streak"] == 0, "already-processed run does not fail the account")
 check(store.q1("SELECT status FROM slices WHERE id=?", (r["slice_id"],))["status"] == "done", "already-processed slice closed as done")
+
+# 12. first sync on a fresh database loads PhantomBuster's old runs as history, not "hand-launched"
+def fake_hand(cid):
+    STATE["containers"][cid] = {"agent": "x", "url": "https://www.linkedin.com/sales/search/people?query=x", "status": "finished"}
+    return {"id": cid, "status": "finished", "exitCode": 0, "createdAt": int(dt.datetime.now().timestamp() * 1000) - 86400000 * 3}
+
+
+pb.containers = lambda agent_id, limit=20: [fake_hand("9001")] if agent_id == "6910468073602201" else []
+store.kv_set("runs_backfilled", None)
+store.kv_set("hand_sync_at", None)
+runner.sync_hand_runs()
+r = store.q1("SELECT * FROM runs WHERE container_id='9001'")
+check(r and r["source"] == "history", "first sync stores old PhantomBuster runs as history")
+check(not store.q("SELECT 1 FROM events WHERE text LIKE '%hand-launched%' AND ts>=?", (store.iso(store.now() - dt.timedelta(minutes=1)),)),
+      "first sync logs no hand-launched runs")
+pb.containers = lambda agent_id, limit=20: [fake_hand("9002")] if agent_id == "6910468073602201" else []
+store.kv_set("hand_sync_at", None)
+runner.sync_hand_runs()
+check(store.q1("SELECT source FROM runs WHERE container_id='9002'")["source"] == "hand", "later runs still count as hand-launched")
 print("all checks passed")
