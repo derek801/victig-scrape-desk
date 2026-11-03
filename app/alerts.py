@@ -37,13 +37,13 @@ def raise_alert(key, text, grace_min=60, remind_h=24):
     store.kv_set("alerts_open", open_)
 
 
-def clear(key, text=None):
+def clear(key, text=None, quiet=False):
     open_ = store.kv_get("alerts_open", {})
     a = open_.pop(key, None)
     if a is None:
         return
     store.kv_set("alerts_open", open_)
-    if a.get("announced"):
+    if a.get("announced") and not quiet:
         _post(f":large_green_circle: *Scrape Desk:* resolved: {text or a['text']}")
 
 

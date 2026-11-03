@@ -10,7 +10,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import alerts, config, runner, seed, slicer, store
+from . import alerts, clay, config, runner, seed, slicer, store
 
 app = FastAPI(title="Scrape Desk", docs_url=None, redoc_url=None)
 app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET or secrets.token_hex(32),
@@ -24,6 +24,7 @@ GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"
 def _startup():
     store.init()
     seed.seed()
+    clay.ensure()
     if config.RUN_SCHEDULER:
         runner.start()
 
@@ -190,6 +191,7 @@ def state(request: Request):
         "heartbeat": store.kv_get("heartbeat"), "pb_key": bool(config.PB_API_KEY),
         "pb_storage_full": store.kv_get("pb_storage_full"), "calibration": store.kv_get("calibration"),
         "in_window": runner.in_window(), "tz": config.TZ, "now_local": runner.local_now().isoformat(timespec="minutes"),
+        "clay": clay.overview(),
         "doordash": {"enabled": s["doordash_sync"], "key": bool(config.BISON_KEY_VICTIG),
                      "last": store.kv_get("doordash_last"), "history": (store.kv_get("doordash_history") or [])[-12:]},
     }
@@ -242,6 +244,31 @@ def set_settings(request: Request, patch: dict = Body(...)):
         for r in store.q("SELECT id, cycle FROM regions"):
             slicer.build_cycle(r["id"], r["cycle"])
         store.log("rebuilt pending slices for every region")
+    return {"ok": True}
+
+
+@app.post("/api/clay/{tid}")
+def set_clay(tid: int, request: Request, patch: dict = Body(...)):
+    need_write(request)
+    try:
+        clay.update(tid, patch)
+    except KeyError:
+        raise HTTPException(404)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    store.log(f"{user(request)} updated Clay table {tid}: {', '.join(k for k in patch)}")
+    return {"ok": True}
+
+
+@app.post("/api/clay/{tid}/replace")
+def replace_clay(tid: int, request: Request, body: dict = Body(...)):
+    need_write(request)
+    try:
+        clay.replace(tid, body.get("url"), body.get("name"))
+    except KeyError:
+        raise HTTPException(404)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return {"ok": True}
 
 

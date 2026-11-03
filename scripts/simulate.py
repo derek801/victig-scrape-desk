@@ -17,7 +17,7 @@ os.environ["DATA_DIR"] = tempfile.mkdtemp()
 os.environ["PB_API_KEY"] = "fake"
 os.environ["RUN_SCHEDULER"] = "0"
 
-from app import pb, runner, seed, slicer, store  # noqa: E402
+from app import alerts, clay, pb, runner, seed, slicer, store  # noqa: E402
 
 STATE = {"next": 1000, "containers": {}, "script": {}}
 
@@ -238,4 +238,31 @@ if solo:
     check(slicer.record_result(solo, 9000, 2500) == "capped", "one county, band and title left: capped")
 big, small = slicer.county_est("x", 1_000_000, ["D"], 1.0, {}), slicer.county_est("y", 400_000, ["D"], 1.0, {})
 check(abs(big - small * 2.5 * 1.5) <= 3, "counties of 500k+ get the 1.5x estimate uplift until measured")
+
+# 14. Clay table tracking: starting count + scraped since, alerts by level, replace restarts at zero
+clay.ensure()
+tabs = {t["account_key"]: t for t in clay.overview()}
+check(len(tabs) == 5 and tabs["blake"]["url"] and tabs["blake"]["rows"] is None, "five Clay tables, Blake's linked, counts unset")
+tid = tabs["max"]["id"]
+clay.update(tid, {"rows": 40000})
+store.x("INSERT INTO runs(account_key,container_id,launched_at,status,got,source) VALUES('max','clay-t1',?, 'finished', 2000, 'desk')",
+        (store.iso(store.now() + dt.timedelta(minutes=1)),))
+t = [x for x in clay.overview() if x["id"] == tid][0]
+check(t["rows"] == 42000 and t["level"] == 80, "count = starting count + profiles scraped since (84% -> level 80)")
+clay.check()
+check(f"clay:{tid}:80" in alerts.open_alerts(), "80% alert raised")
+clay.update(tid, {"rows": 44000})
+clay.check()
+open_ = alerts.open_alerts()
+check(f"clay:{tid}:90" in open_ and f"clay:{tid}:80" not in open_, "crossing 90% replaces the 80% alert")
+store.x("DELETE FROM runs WHERE container_id='clay-t1'")   # test run was stamped in the future
+clay.replace(tid, "https://app.clay.com/workspaces/1/tables/t_new")
+t2 = [x for x in clay.overview() if x["account_key"] == "max"][0]
+check(t2["id"] != tid and t2["rows"] == 0 and not [k for k in alerts.open_alerts() if k.startswith(f"clay:{tid}:")],
+      "duplicate: new table tracked from 0, old alerts cleared")
+try:
+    clay.update(t2["id"], {"url": "https://evil.example/x"})
+    check(False, "non-Clay link rejected")
+except ValueError:
+    check(True, "non-Clay link rejected")
 print("all checks passed")
