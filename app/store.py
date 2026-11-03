@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS counties (
   region_id INTEGER, last_scraped TEXT);
 CREATE TABLE IF NOT EXISTS slices (
   id INTEGER PRIMARY KEY, region_id INTEGER, cycle INTEGER, seq REAL, counties TEXT, bands TEXT,
-  est INTEGER, status TEXT DEFAULT 'pending', parent_id INTEGER, attempts INTEGER DEFAULT 0,
+  titles TEXT, est INTEGER, status TEXT DEFAULT 'pending', parent_id INTEGER, attempts INTEGER DEFAULT 0,
   total INTEGER, got INTEGER, started_at TEXT, finished_at TEXT, note TEXT);
 CREATE INDEX IF NOT EXISTS slices_q ON slices(region_id, cycle, status, seq);
 CREATE TABLE IF NOT EXISTS runs (
@@ -76,6 +76,10 @@ def conn():
 def init():
     with _lock:
         conn().executescript(SCHEMA)
+        try:                                      # databases made before slices could split by title
+            conn().execute("ALTER TABLE slices ADD COLUMN titles TEXT")
+        except sqlite3.OperationalError:
+            pass
         conn().commit()
 
 

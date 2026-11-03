@@ -13,6 +13,12 @@ from .searchurl import BAND_ORDER
 
 SN_CAP = 2500
 RECENT_DAYS = 45
+# Counties this big hold more HR-titled people per resident than the national fit says: past runs came in a
+# median ~1.5x over estimate. Applied until a county has been measured.
+BIG_COUNTY_POP = 500_000
+BIG_COUNTY_UPLIFT = 1.5
+# Last-resort split for one county in one headcount band that is still over the cap: titles in two groups.
+TALENT_TITLES = {"Talent Acquisition", "Recruiter", "Recruiting", "Recruitment"}
 
 
 def densities():
@@ -38,11 +44,15 @@ def ratios():
     return out
 
 
+def uplift(pop):
+    return BIG_COUNTY_UPLIFT if pop >= BIG_COUNTY_POP else 1.0
+
+
 def county_est(fips, pop, bands, factor, rat):
     """One county's expected size. Uses what we measured there when we have it (bands never measured there
-    borrow that county's average), else the region factor."""
+    borrow that county's average), else the region factor (with the big-county uplift)."""
     d, r = densities(), rat.get(fips, {})
-    fallback = sum(r.values()) / len(r) if r else factor
+    fallback = sum(r.values()) / len(r) if r else factor * uplift(pop)
     return int(sum(pop * d[b] * r.get(b, fallback) for b in bands))
 
 
@@ -152,14 +162,21 @@ def _split_bands(bands):
     return [bands[:best], bands[best:]]
 
 
+def title_share(slice_row):
+    """Fraction of the full title list this slice searches (1.0 unless it was split by title)."""
+    sub = json.loads(slice_row["titles"]) if slice_row.get("titles") else None
+    return len(sub) / len(store.settings()["titles"]) if sub else 1.0
+
+
 def record_result(slice_row, total, got):
     """Close a slice after a successful run. Overflow -> split into two children placed next in line
-    (fewer counties first; a single county is split by headcount band)."""
+    (fewer counties first, then headcount bands for a single county, then title groups)."""
     sid, rid = slice_row["id"], slice_row["region_id"]
     fips, bands = json.loads(slice_row["counties"]), json.loads(slice_row["bands"])
-    pop = sum(c["population"] for c in counties_for(slice_row))
-    _learn(rid, pop, bands, total)
-    _learn_counties(counties_for(slice_row), bands, total)
+    cs = counties_for(slice_row)
+    if not slice_row.get("titles"):          # a title-subset total says little about the whole county
+        _learn(rid, cs, bands, total)
+        _learn_counties(cs, bands, total)
     store.x("UPDATE counties SET last_scraped=? WHERE fips IN (%s)" % ",".join("?" * len(fips)), [store.iso()] + fips)
     if total is None or total <= SN_CAP:
         store.x("UPDATE slices SET status='done',total=?,got=?,finished_at=? WHERE id=?", (total, got, store.iso(), sid))
@@ -167,11 +184,11 @@ def record_result(slice_row, total, got):
     halves = _halves(slice_row)
     if not halves:
         store.x("UPDATE slices SET status='capped',total=?,got=?,finished_at=?,note=? WHERE id=?",
-                (total, got, store.iso(), f"single county+band has {total} results; Sales Nav shows 2,500", sid))
+                (total, got, store.iso(), f"single county, band and title has {total} results; Sales Nav shows 2,500", sid))
         return "capped"
     store.x("UPDATE slices SET status='split',total=?,got=?,finished_at=? WHERE id=?", (total, got, store.iso(), sid))
-    whole = sum(w for _, _, w in halves)
-    _insert_children(slice_row, [(f, b, int(total * w / whole)) for f, b, w in halves])
+    whole = sum(h["w"] for h in halves)
+    _insert_children(slice_row, [(h["fips"], h["bands"], h["titles"], int(total * h["w"] / whole)) for h in halves])
     return "split"
 
 
@@ -185,44 +202,63 @@ def record_skipped(slice_row):
             (store.iso(), "PhantomBuster had already processed this search", slice_row["id"]))
 
 
+def _split_titles(titles):
+    """Two title groups: Talent/recruiting terms vs the HR/people terms (halves by position if that can't split)."""
+    a = [t for t in titles if t not in TALENT_TITLES]
+    b = [t for t in titles if t in TALENT_TITLES]
+    if not a or not b:
+        a, b = titles[:len(titles) // 2], titles[len(titles) // 2:]
+    return [a, b]
+
+
 def _halves(slice_row):
-    """Two smaller slices to replace this one, as (counties, bands, weight), or None if it can't shrink.
-    Shed counties first; only a single county gets broken up by headcount band."""
+    """Two smaller slices to replace this one, as dicts (fips, bands, titles, w = relative size), or None if it
+    can't shrink. Shed counties first, then headcount bands of a single county, then title groups."""
     fips, bands = json.loads(slice_row["counties"]), json.loads(slice_row["bands"])
+    titles = json.loads(slice_row["titles"]) if slice_row.get("titles") else None
     if len(fips) > 1:
         pops = {c["fips"]: c["population"] for c in counties_for(slice_row)}
-        return [(g, bands, sum(pops.get(f, 0) for f in g) or 1) for g in _split_counties(fips, pops)]
+        return [{"fips": g, "bands": bands, "titles": titles, "w": sum(pops.get(f, 0) for f in g) or 1}
+                for g in _split_counties(fips, pops)]
     if len(bands) > 1:
         d = densities()
-        return [(fips, g, sum(d[b] for b in g)) for g in _split_bands(bands)]
+        return [{"fips": fips, "bands": g, "titles": titles, "w": sum(d[b] for b in g)} for g in _split_bands(bands)]
+    cur = titles or store.settings()["titles"]
+    if len(cur) > 1:
+        return [{"fips": fips, "bands": bands, "titles": g, "w": len(g)} for g in _split_titles(cur)]
     return None
 
 
 def _insert_children(slice_row, kids):
-    """Queue (counties, bands, est) children right behind the parent."""
+    """Queue (counties, bands, titles, est) children right behind the parent."""
     rid = slice_row["region_id"]
     nxt = store.q1("SELECT MIN(seq) m FROM slices WHERE region_id=? AND cycle=? AND status='pending'",
                    (rid, slice_row["cycle"]))["m"]
     lo = slice_row["seq"]
     hi = nxt if nxt is not None else lo + 1
-    for i, (f, b, e) in enumerate(kids):
-        store.x("INSERT INTO slices(region_id,cycle,seq,counties,bands,est,status,parent_id) VALUES(?,?,?,?,?,?, 'pending', ?)",
-                (rid, slice_row["cycle"], lo + (hi - lo) * (i + 1) / 3, json.dumps(f), json.dumps(b), e,
-                 slice_row["id"]))
+    for i, (f, b, t, e) in enumerate(kids):
+        store.x("INSERT INTO slices(region_id,cycle,seq,counties,bands,titles,est,status,parent_id) "
+                "VALUES(?,?,?,?,?,?,?, 'pending', ?)",
+                (rid, slice_row["cycle"], lo + (hi - lo) * (i + 1) / 3, json.dumps(f), json.dumps(b),
+                 json.dumps(t) if t else None, e, slice_row["id"]))
+
+
+def _est(cs, bands, titles, factor, rat):
+    share = len(titles) / len(store.settings()["titles"]) if titles else 1.0
+    return int(sum(county_est(c["fips"], c["population"], bands, factor, rat) for c in cs) * share)
 
 
 def current_est(slice_row):
     """Size of a queued slice using everything learned so far (its stored est may be weeks old)."""
     reg = store.q1("SELECT factor FROM regions WHERE id=?", (slice_row["region_id"],))
-    rat, bands = ratios(), json.loads(slice_row["bands"])
-    return sum(county_est(c["fips"], c["population"], bands, reg["factor"] or 1.0, rat)
-               for c in counties_for(slice_row))
+    titles = json.loads(slice_row["titles"]) if slice_row.get("titles") else None
+    return _est(counties_for(slice_row), json.loads(slice_row["bands"]), titles, reg["factor"] or 1.0, ratios())
 
 
 def next_ready(region_id):
     """Next slice to launch. Re-estimates it first; if it now looks over Sales Nav's cap it is split
-    (counties, then bands) before launch rather than scraped blind and capped. A slice that can't shrink
-    further goes ahead and returns the first 2,500."""
+    (counties, bands, then titles) before launch rather than scraped blind and capped. A slice that can't
+    shrink further goes ahead and returns the first 2,500."""
     for _ in range(20):
         sl = next_slice(region_id)
         if not sl:
@@ -236,21 +272,22 @@ def next_ready(region_id):
             return sl
         store.x("UPDATE slices SET status='split',finished_at=?,note=? WHERE id=?",
                 (store.iso(), f"estimated {e:,} before launch; split to stay under {SN_CAP:,}", sl["id"]))
-        d = {c["fips"]: c for c in counties_for(sl)}
-        bands = json.loads(sl["bands"])
-        reg = store.q1("SELECT factor FROM regions WHERE id=?", (region_id,))
+        cmap = {c["fips"]: c for c in counties_for(sl)}
+        factor = store.q1("SELECT factor FROM regions WHERE id=?", (region_id,))["factor"] or 1.0
         rat = ratios()
-        _insert_children(sl, [(f, b, sum(county_est(x, d[x]["population"], b, reg["factor"] or 1.0, rat)
-                                         for x in f if x in d)) for f, b, _ in halves])
+        _insert_children(sl, [(h["fips"], h["bands"], h["titles"],
+                               _est([cmap[x] for x in h["fips"] if x in cmap], h["bands"], h["titles"], factor, rat))
+                              for h in halves])
         store.log(f"slice {sl['id']} now estimates {e:,}: split before launch")
     return next_slice(region_id)
 
 
-def _learn(region_id, pop, bands, total):
+def _learn(region_id, cs, bands, total):
     """Move the region factor 30% of the way toward what this run actually showed."""
-    if not total or not pop:
+    if not total or not cs:
         return
-    est = estimate(pop, bands, 1.0)
+    d = densities()
+    est = sum(c["population"] * sum(d[b] for b in bands) * uplift(c["population"]) for c in cs)
     if est <= 0:
         return
     reg = store.q1("SELECT factor FROM regions WHERE id=?", (region_id,))
