@@ -188,6 +188,7 @@ function renderAccounts(){
   const rows=S.accounts.map(a=>{
     const st=!a.enabled?`<span class="muted">Off</span>`:a.status==="ok"?`<span class="ok"><span class="dot" style="background:var(--green)"></span>OK</span>`:`<span class="att"><span class="dot" style="background:var(--red)"></span>Needs attention</span><div class="small att">${esc(a.status_note)}</div>`;
     const pct=Math.min(100,Math.round(a.today_got/a.daily_budget*100));
+    const hold=a.enabled&&a.clay_hold?`<div class="small att">Launches held: its Clay table is full</div>`:"";
     const run=a.running?`<div class="small" style="color:var(--blue)">Running since ${tLocal(a.running.launched_at)}</div>`:"";
     const nx=a.next?`<div>${esc(a.next.counties.slice(0,3).join("; "))}${a.next.counties.length>3?` <span class="muted">+${a.next.counties.length-3} more</span>`:""}</div>
       <div class="small muted">${a.next.bands.map(b=>BANDS[b]).join(", ")} · est ${fmt(a.next.est)} · <a href="${esc(a.next.url)}" target="_blank" rel="noopener">open search</a></div>`:`<span class="muted">${a.region_id?"region finished, waiting to restart":"no region"}</span>`;
@@ -196,7 +197,7 @@ function renderAccounts(){
     if(a.enabled&&a.status!=="ok")acts.push(`<button onclick="act('/api/accounts/${a.key}',{clear_attention:true})">Mark fixed</button>`);
     if(a.enabled&&a.next)acts.push(`<button ${S.settings.dry_run||a.running?"disabled":""} title="${S.settings.dry_run?"Turn dry run off first":"Launch the next slice now"}" onclick="if(confirm('Launch ${esc(a.name)}\\'s next slice now?'))act('/api/accounts/${a.key}/launch-now',{})">Launch now</button>`);
     return `<tr><td><span class="dot" style="background:${ACOL[a.key]||"#999"}"></span><b>${esc(a.name)}</b><div class="small muted">last scrape ${ago(a.last_scrape)}</div></td>
-      <td>${regSel}</td><td>${st}${run}</td>
+      <td>${regSel}</td><td>${st}${hold}${run}</td>
       <td>${fmt(a.today_got)} <span class="muted small">/ ${fmt(a.daily_budget)}</span><div class="bar"><i style="width:${pct}%"></i></div><div class="small muted">${a.today_runs} run${a.today_runs===1?"":"s"} today</div></td>
       <td style="max-width:380px">${nx}</td><td style="white-space:nowrap">${acts.join(" ")}</td></tr>`}).join("");
   $("accts").innerHTML=`<tr><th>Account</th><th>Region</th><th>Status</th><th>Today</th><th>Next slice</th><th></th></tr>${rows}`;
@@ -206,7 +207,7 @@ function renderClay(){
     const pct=t.pct==null?0:Math.min(100,t.pct), col=t.pct>=95?"var(--red)":t.pct>=80?"var(--amber)":"var(--blue)";
     const used=t.rows==null?`<span class="muted">starting count not set</span>`:`<b>${fmt(t.rows)}</b> <span class="muted small">/ ${fmt(t.limit)} · ${t.pct}%</span>`;
     const eta=t.rows==null?"":t.days_left==null?`<div class="small muted">no recent scraping</div>`:`<div class="small ${t.level?"att":"muted"}">full in about ${t.days_left} working day${t.days_left===1?"":"s"} (${fmt(t.per_day)}/day)</div>`;
-    const st=t.level>=90?`<span class="att"><b>Needs duplicating</b></span>`:t.level?`<span style="color:var(--amber)"><b>Getting full</b></span>`:t.rows==null?"":`<span class="ok">OK</span>`;
+    const st=t.pct>=98?`<span class="att"><b>Full: launches held</b></span>`:t.level>=90?`<span class="att"><b>Needs duplicating</b></span>`:t.level?`<span style="color:var(--amber)"><b>Getting full</b></span>`:t.rows==null?"":`<span class="ok">OK</span>`;
     const link=t.url?`<a href="${esc(t.url)}" target="_blank" rel="noopener">open in Clay</a>`:`<span class="muted small">no link yet</span>`;
     return `<tr><td><span class="dot" style="background:${ACOL[t.account_key]||"#999"}"></span><b>${esc(t.name)}</b><div class="small">${link}</div></td>
       <td>${used}<div class="bar" style="width:240px"><i style="width:${pct}%;background:${col}"></i></div>${eta}</td><td>${st}</td>

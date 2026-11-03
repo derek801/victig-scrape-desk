@@ -165,6 +165,7 @@ def state(request: Request):
     accts = store.q("SELECT * FROM accounts ORDER BY enabled DESC, key")
     for a in accts:
         a["today_runs"], a["today_got"] = runner.account_today(a["key"])
+        a["clay_hold"] = clay.held(a["key"])
         a["running"] = store.q1("SELECT id, launched_at, slice_id FROM runs WHERE account_key=? AND "
                                 "status IN ('launched','running') AND source='desk'", (a["key"],))
         plan = runner.plan_for(a) if a["region_id"] else None

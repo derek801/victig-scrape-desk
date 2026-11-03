@@ -265,4 +265,12 @@ try:
     check(False, "non-Clay link rejected")
 except ValueError:
     check(True, "non-Clay link rejected")
+clay.update(t2["id"], {"rows": 49500})
+check(clay.held("max") and not clay.held("blake"), "table at 99%: that account's launches are held")
+runner.in_window = lambda t=None: True
+store.x("UPDATE accounts SET status='ok', enabled=1, next_launch_at=?, daily_budget=2000 WHERE key='max'", (store.iso(store.now() - dt.timedelta(minutes=5)),))
+store.x("DELETE FROM runs WHERE account_key='max' AND source='desk'")
+check(not runner.due(store.q1("SELECT * FROM accounts WHERE key='max'")), "held account is not due")
+clay.update(t2["id"], {"rows": 100})
+check(not clay.held("max") and runner.due(store.q1("SELECT * FROM accounts WHERE key='max'")), "hold lifts once the count is back down")
 print("all checks passed")

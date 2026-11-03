@@ -8,8 +8,15 @@ from . import alerts, store
 
 LIMIT = 50_000
 LEVELS = (95, 90, 80)             # alert thresholds, highest first
-LINKS = {"blake": "https://app.clay.com/workspaces/484469/workbooks/wb_0tmv2nagmVBxouV3B3x/tables/"
-                  "t_0tmv2nbbe9eXvxxu8Vf/views/gv_9JnJZA5Xvrg8"}
+HOLD_PCT = 98                    # at this fill level the desk stops launching that rep until the table is dealt with
+_W = "https://app.clay.com/workspaces/484469/workbooks/"
+LINKS = {
+    "blake": _W + "wb_0tmv2nagmVBxouV3B3x/tables/t_0tmv2nbbe9eXvxxu8Vf/views/gv_9JnJZA5Xvrg8",
+    "max": _W + "wb_0tmv2n8viZKnyw9mBUS/tables/t_0tmv2n87qRGfsEnfvnv/views/gv_9JnJZA5Xvrg8",
+    "dustin": _W + "wb_0tmv2myZbozSMR7BExa/tables/t_0tmv2my9wNDnjCTzzJK/views/gv_9JnJZA5Xvrg8",
+    "derek": _W + "wb_0tmv2mtGJDp98HBk9XM/tables/t_0tmv2mtTZdAdvpSVorV/views/gv_9JnJZA5Xvrg8",
+    "brent": _W + "wb_0tmuqf1dzgyZDnJz8Dg/tables/t_0tmuqf1KScopp9gg3NH/views/gv_9JnJZA5Xvrg8",
+}
 URL_PREFIX = "https://app.clay.com/"
 
 
@@ -52,6 +59,15 @@ def overview():
     return out
 
 
+def held(key):
+    """True while this rep's table is at/over HOLD_PCT: the desk won't start new launches for the account."""
+    t = store.q1("SELECT * FROM clay_tables WHERE account_key=? AND active=1", (key,))
+    if not t:
+        return False
+    rows = rows_used(t)
+    return rows is not None and rows / (t["row_limit"] or LIMIT) * 100 >= HOLD_PCT
+
+
 def _clear_levels(tid, quiet=True, text=None):
     for l in LEVELS:
         alerts.clear(f"clay:{tid}:{l}", text, quiet=quiet)
@@ -61,7 +77,13 @@ def check():
     """Alert once per table per level (80 / 90 / 95%), re-announced only as a reminder."""
     ensure()
     state = store.kv_get("clay_levels", {})
+    holds = store.kv_get("clay_holds", {})
     for t in overview():
+        now_held = held(t["account_key"])
+        if now_held != bool(holds.get(t["account_key"])):
+            store.log(f"{t['name']} (Clay) {'is full: launches held for that account until it is duplicated' if now_held else 'has room again: launches resume'}",
+                      "alert" if now_held else "info")
+            holds[t["account_key"]] = now_held
         tid, lvl, prev = str(t["id"]), t["level"], state.get(str(t["id"]), 0)
         if lvl == prev and not lvl:
             continue
@@ -73,10 +95,12 @@ def check():
             alerts.raise_alert(
                 f"clay:{tid}:{lvl}",
                 f"{t['name']} (Clay) is at {t['pct']:g}% ({t['rows']:,} of {t['limit']:,} rows){eta}. "
-                + ("Duplicate it now." if lvl >= 90 else "Plan to duplicate it soon."),
+                + ("Launches for this account are on hold until it's duplicated." if lvl >= HOLD_PCT else
+                   "Duplicate it now." if lvl >= 90 else "Plan to duplicate it soon."),
                 grace_min=0, remind_h=24 if lvl >= 95 else 48)
         state[tid] = lvl
     store.kv_set("clay_levels", state)
+    store.kv_set("clay_holds", holds)
 
 
 def _valid_url(url):
