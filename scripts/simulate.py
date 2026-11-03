@@ -119,9 +119,14 @@ for parent in [s for s in split if s["status"] == "split"]:
     if len(pc) > 1:
         check(all(b == pb_ for b in cb) and sorted(sum(cc, [])) == sorted(pc) and all(cc),
               f"slice {parent['id']}: multi-county overflow splits counties, keeps bands")
-    else:
+    elif len(pb_) > 1:
         check(all(c == pc for c in cc) and sum(cb, []) == pb_ and all(cb),
               f"slice {parent['id']}: single-county overflow splits headcount bands")
+    else:
+        ct = [json.loads(k["titles"]) for k in ch]
+        check(all(c == pc for c in cc) and all(b == pb_ for b in cb) and all(ct)
+              and sorted(sum(ct, [])) == sorted(store.settings()["titles"]),
+              f"slice {parent['id']}: one county+band overflow splits title groups")
 
 # 4. daily budget: with 2,000/day and ~4,000 already scraped, nothing more launches
 store.x("UPDATE accounts SET daily_budget=2000")
@@ -223,4 +228,14 @@ pb.containers = lambda agent_id, limit=20: [fake_hand("9002")] if agent_id == "6
 store.kv_set("hand_sync_at", None)
 runner.sync_hand_runs()
 check(store.q1("SELECT source FROM runs WHERE container_id='9002'")["source"] == "hand", "later runs still count as hand-launched")
+
+# 13. title-group splitting ends in a cap; big counties get the estimate uplift until measured
+solo = store.q1("SELECT * FROM slices WHERE status='pending' AND counties NOT LIKE '%,%' AND bands NOT LIKE '%,%' LIMIT 1")
+if solo:
+    t = ["Recruiter"]
+    store.x("UPDATE slices SET titles=? WHERE id=?", (json.dumps(t), solo["id"]))
+    solo = store.q1("SELECT * FROM slices WHERE id=?", (solo["id"],))
+    check(slicer.record_result(solo, 9000, 2500) == "capped", "one county, band and title left: capped")
+big, small = slicer.county_est("x", 1_000_000, ["D"], 1.0, {}), slicer.county_est("y", 400_000, ["D"], 1.0, {})
+check(abs(big - small * 2.5 * 1.5) <= 3, "counties of 500k+ get the 1.5x estimate uplift until measured")
 print("all checks passed")

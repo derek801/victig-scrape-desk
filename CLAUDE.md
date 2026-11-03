@@ -46,7 +46,8 @@ user-facing picture; this file is the working knowledge behind it.
 - **Slice size estimates** come from `data/calibration.json` (results per resident by band, fitted on past
   runs, typical miss ~28%), times a per-region factor that moves 30% toward reality after each run. Each run also records real-size ratios per
   county and band (`county_ratio`), which override the national figure next time. Before launch `slicer.next_ready`
-  re-estimates the slice and splits it if it now looks over 2,500.
+  re-estimates the slice and splits it if it now looks over 2,500 (counties, then bands, then title groups
+  via `slices.titles`). Counties of 500k+ get a 1.5x estimate uplift until measured.
 - **PhantomBuster org:** "VICTIG Workspace", id `3152587389729387`. The API key is per workspace.
 - Agent ids per rep are in `seed.ACCOUNTS`.
 

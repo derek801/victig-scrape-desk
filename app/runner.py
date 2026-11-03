@@ -212,7 +212,8 @@ def plan_for(acct):
     if not sl:
         return None
     cs = slicer.counties_for(sl)
-    url = searchurl.build(store.settings()["titles"], [(c["geo_id"], c["linkedin_text"]) for c in cs],
+    titles = json.loads(sl["titles"]) if sl["titles"] else store.settings()["titles"]
+    url = searchurl.build(titles, [(c["geo_id"], c["linkedin_text"]) for c in cs],
                           json.loads(sl["bands"]))
     return sl, url, cs
 
@@ -267,7 +268,7 @@ def launch_one(acct):
             (acct["key"], sl["id"], cid, url, store.iso()))
     names = ", ".join(c["linkedin_text"].split(",")[0] for c in cs[:3]) + (f" +{len(cs) - 3}" if len(cs) > 3 else "")
     store.log(f"{acct['name']}: launched slice {sl['id']} ({names}; bands {','.join(json.loads(sl['bands']))}; "
-              f"est {sl['est']:,})")
+              f"est {sl['est']:,}" + (f"; titles {', '.join(json.loads(sl['titles']))}" if sl["titles"] else "") + ")")
 
 
 def _api_failure(e):
