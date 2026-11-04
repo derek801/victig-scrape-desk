@@ -33,6 +33,9 @@ CREATE INDEX IF NOT EXISTS runs_acct ON runs(account_key, launched_at);
 CREATE UNIQUE INDEX IF NOT EXISTS runs_container ON runs(container_id);
 CREATE TABLE IF NOT EXISTS county_ratio (
   fips TEXT, band TEXT, ratio REAL, PRIMARY KEY (fips, band));
+CREATE TABLE IF NOT EXISTS clay_tables (
+  id INTEGER PRIMARY KEY, account_key TEXT, name TEXT, url TEXT, baseline_rows INTEGER, baseline_at TEXT,
+  row_limit INTEGER DEFAULT 50000, active INTEGER DEFAULT 1, created_at TEXT, archived_at TEXT);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, ts TEXT, level TEXT, text TEXT);
 """
 

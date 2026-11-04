@@ -10,7 +10,7 @@ import time
 import traceback
 from zoneinfo import ZoneInfo
 
-from . import alerts, config, geo, pb, searchurl, slicer, store
+from . import alerts, clay, config, geo, pb, searchurl, slicer, store
 
 TICK_S = 60
 MAX_SLICE_ATTEMPTS = 3
@@ -222,6 +222,8 @@ def due(acct):
     s = store.settings()
     if acct["status"] != "ok" or not acct["enabled"] or not in_window():
         return False
+    if clay.held(acct["key"]):          # its Clay table is (nearly) full: more leads would be lost
+        return False
     n, got = account_today(acct["key"])
     if n >= s["max_launches_per_day"] or got >= acct["daily_budget"]:
         return False
@@ -289,6 +291,7 @@ def tick():
         sync_hand_runs()
     retry_attention()
     health_checks()
+    clay.check()
     if s["paused"] or s["dry_run"] or breaker() or not config.PB_API_KEY:
         return
     for acct in store.q("SELECT * FROM accounts WHERE enabled=1 ORDER BY key"):

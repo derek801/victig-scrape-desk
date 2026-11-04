@@ -15,6 +15,7 @@ user-facing picture; this file is the working knowledge behind it.
 - `app/pb.py`: PhantomBuster API v2 client + run-log parser
 - `app/geo.py`: fills missing LinkedIn county location ids, slowly
 - `app/alerts.py`: Slack alerts with grace period / reminders / "resolved"
+- `app/clay.py`: row estimate per Clay table (one per rep, filled by Clay's PhantomBuster pull): set count + profiles scraped since; alerts at 80/90/95% of 50k. Clay has no API to read counts or duplicate tables, so duplicating is a guided manual step
 - `app/seed.py`: first-boot data (regions, accounts, counties, calibration, past runs)
 - `app/jobs/doordash*.py`: optional Bison campaign-10 hygiene job (off by default)
 - `app/static/index.html`: the whole UI, vanilla JS + d3 map
