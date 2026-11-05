@@ -35,3 +35,7 @@ services:
         sync: false
       - key: BISON_KEY_VICTIG
         sync: false
+      - key: HYPERTIDE_API_KEY
+        sync: false
+      - key: GOOGLE_CHAT_WEBHOOK
+        sync: false

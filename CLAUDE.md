@@ -15,6 +15,7 @@ user-facing picture; this file is the working knowledge behind it.
 - `app/pb.py`: PhantomBuster API v2 client + run-log parser
 - `app/geo.py`: fills missing LinkedIn county location ids, slowly
 - `app/alerts.py`: Slack alerts with grace period / reminders / "resolved"
+- `app/inbox.py`: Inbox Health tab. Lifetime bounce rate per sending domain from Bison sender emails (+ Hypertide order status), bands 2%/3%, read-only for now; synced every 6h in its own thread; grouped alerts
 - `app/clay.py`: row estimate per Clay table (one per rep, filled by Clay's PhantomBuster pull): set count + profiles scraped since; alerts at 80/90/95% of 50k. Clay has no API to read counts or duplicate tables, so duplicating is a guided manual step
 - `app/seed.py`: first-boot data (regions, accounts, counties, calibration, past runs)
 - `app/jobs/doordash*.py`: optional Bison campaign-10 hygiene job (off by default)
@@ -59,6 +60,7 @@ user-facing picture; this file is the working knowledge behind it.
   Overuse can get a rep's LinkedIn account restricted.
 - A failing step must block its own account and trip the global breaker, never loop. Alert once per
   problem, never per item.
+- Alerts go to the rev ops Google Chat space (`GOOGLE_CHAT_WEBHOOK`), Slack only as fallback.
 - Secrets only in env vars (Render dashboard or `.env.local`, which is gitignored). Nothing secret in the repo.
 - After changing runner/slicer: `python scripts/simulate.py` must print "all checks passed".
 

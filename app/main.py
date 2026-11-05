@@ -10,7 +10,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import alerts, clay, config, runner, seed, slicer, store
+from . import alerts, clay, config, inbox, runner, seed, slicer, store
 
 app = FastAPI(title="Scrape Desk", docs_url=None, redoc_url=None)
 app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET or secrets.token_hex(32),
@@ -27,6 +27,7 @@ def _startup():
     clay.ensure()
     if config.RUN_SCHEDULER:
         runner.start()
+        inbox.start()
 
 
 # ---- auth ---------------------------------------------------------------------------------------
@@ -245,6 +246,21 @@ def set_settings(request: Request, patch: dict = Body(...)):
         for r in store.q("SELECT id, cycle FROM regions"):
             slicer.build_cycle(r["id"], r["cycle"])
         store.log("rebuilt pending slices for every region")
+    return {"ok": True}
+
+
+@app.get("/api/inbox")
+def inbox_state(request: Request):
+    need_user(request)
+    return inbox.overview()
+
+
+@app.post("/api/inbox/sync")
+def inbox_sync(request: Request):
+    need_write(request)
+    if not config.BISON_KEY_VICTIG:
+        raise HTTPException(400, "BISON_KEY_VICTIG is not set")
+    inbox.sync_in_background()
     return {"ok": True}
 
 
