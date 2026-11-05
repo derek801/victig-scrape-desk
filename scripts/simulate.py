@@ -17,7 +17,7 @@ os.environ["DATA_DIR"] = tempfile.mkdtemp()
 os.environ["PB_API_KEY"] = "fake"
 os.environ["RUN_SCHEDULER"] = "0"
 
-from app import alerts, clay, pb, runner, seed, slicer, store  # noqa: E402
+from app import alerts, clay, config, inbox, pb, runner, seed, slicer, store  # noqa: E402
 
 STATE = {"next": 1000, "containers": {}, "script": {}}
 
@@ -273,4 +273,41 @@ store.x("DELETE FROM runs WHERE account_key='max' AND source='desk'")
 check(not runner.due(store.q1("SELECT * FROM accounts WHERE key='max'")), "held account is not due")
 clay.update(t2["id"], {"rows": 100})
 check(not clay.held("max") and runner.due(store.q1("SELECT * FROM accounts WHERE key='max'")), "hold lifts once the count is back down")
+
+# 15. Inbox Health: lifetime bounce per domain, bands, grouped alerts, Google Chat card
+def mk(i, dom, sent, bounced, status="Connected"):
+    return {"id": i, "email": f"u{i}@{dom}", "status": status, "warmup_enabled": True, "daily_limit": 5,
+            "emails_sent_count": sent, "bounced_count": bounced, "total_replied_count": 0}
+
+
+fake = ([mk(i, "good.com", 200, 2) for i in range(10)] + [mk(100 + i, "warn.com", 200, 5) for i in range(10)]
+        + [mk(200 + i, "bad.com", 200, 8) for i in range(10)] + [mk(300 + i, "tiny.com", 10, 5) for i in range(3)]
+        + [mk(400, "good.com", 200, 2, "Not connected")])
+config.BISON_KEY_VICTIG = "x"
+inbox.fetch_senders = lambda: fake
+inbox.fetch_hypertide = lambda: {"bad.com": {"status": "NPC", "created": "2025-06-01", "tool": "Email Bison"}}
+config.HYPERTIDE_API_KEY = "y"
+posted = []
+alerts._post = lambda text, kind="alert", link="": posted.append((kind, text, link)) or True
+check(inbox.sync(), "inbox sync runs")
+o = inbox.overview()
+by = {d["domain"]: d for d in o["domains"]}
+check(by["good.com"]["band"] == "ok" and by["warn.com"]["band"] == "warn" and by["bad.com"]["band"] == "critical"
+      and by["tiny.com"]["band"] == "new", "lifetime bands: ok <2%, warning 2-3%, critical 3%+, too few sends ignored")
+check(by["bad.com"]["ht_status"] == "NPC" and o["disconnected"] == 1, "Hypertide status joined; disconnected counted")
+texts = [t for _, t, _ in posted]
+check(sum("bad.com is critical" in t for t in texts) == 1 and sum("warning zone" in t for t in texts) == 1
+      and sum("not connected" in t for t in texts) == 1, "one alert for the critical domain, one warning digest, one disconnected digest")
+n = len(posted)
+inbox.sync()
+check(len(posted) == n, "a second sync with the same data sends nothing new")
+config.GOOGLE_CHAT_WEBHOOK = "https://chat.googleapis.com/v1/spaces/X/messages?key=k"
+sent_json = {}
+alerts.requests.post = lambda url, json=None, timeout=0: sent_json.update(json=json) or type("R", (), {"ok": True})()
+import importlib
+importlib.reload(alerts)
+alerts.requests.post = lambda url, json=None, timeout=0: sent_json.update(json=json) or type("R", (), {"ok": True})()
+alerts._post("bad.com is critical", "alert", "/#inbox")
+card = sent_json["json"]["cardsV2"][0]["card"]
+check(card["header"]["title"] == "Scrape Desk" and "buttonList" in card["sections"][0]["widgets"][1], "Google Chat alert is a card with an open button")
 print("all checks passed")

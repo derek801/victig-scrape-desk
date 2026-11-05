@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS county_ratio (
 CREATE TABLE IF NOT EXISTS clay_tables (
   id INTEGER PRIMARY KEY, account_key TEXT, name TEXT, url TEXT, baseline_rows INTEGER, baseline_at TEXT,
   row_limit INTEGER DEFAULT 50000, active INTEGER DEFAULT 1, created_at TEXT, archived_at TEXT);
+CREATE TABLE IF NOT EXISTS inbox_senders (
+  id INTEGER PRIMARY KEY, email TEXT, domain TEXT, status TEXT, warmup INTEGER, daily_limit INTEGER,
+  sent INTEGER, bounced INTEGER, replied INTEGER);
+CREATE INDEX IF NOT EXISTS inbox_dom ON inbox_senders(domain);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, ts TEXT, level TEXT, text TEXT);
 """
 
@@ -53,6 +57,9 @@ DEFAULT_SETTINGS = {
     "weekdays_only": True,
     "max_launches_per_day": 3,
     "regap_days": 30,             # a region restarts from the top only if its last cycle began this long ago
+    "inbox_min_sends": 100,       # a domain is judged on lifetime bounce rate once it has this many sends
+    "inbox_warn_pct": 2.0,        # Bison: 2-3% is the warning zone ...
+    "inbox_crit_pct": 3.0,        # ... 3%+ is critical (replace)
     "doordash_sync": False,       # campaign-10 hygiene job (moved off Derek's PC when switched on)
     "doordash_sync_every_min": 120,
 }

@@ -64,6 +64,15 @@ textarea{width:100%;min-height:150px}
 .field label{min-width:190px;color:var(--mute)}
 .bands label{margin-right:12px;white-space:nowrap}
 .tabs{display:flex;gap:6px;margin-bottom:12px}
+.pagetabs{display:flex;gap:4px;margin-left:10px}
+.pagetabs button{background:transparent;border-color:transparent;color:#cbd5e1;padding:6px 12px}
+.pagetabs button.on{background:#1e293b;border-color:#334155;color:#fff}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.pill.critical{background:#fde8e8;color:#7f1d1d}.pill.warn{background:#fff3cd;color:#78350f}.pill.ok{background:#d1fae5;color:#064e3b}.pill.new{background:#eef1f6;color:var(--mute)}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+.filters button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+body.inboxtab .deskonly{display:none}
+[hidden]{display:none!important}
 .tabs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 dialog{border:0;border-radius:12px;padding:0;max-width:900px;width:92vw;box-shadow:0 20px 60px #0003}
 dialog .hd{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
@@ -78,12 +87,23 @@ a{color:var(--blue)}
 <body>
 <header>
   <div><h1>Scrape Desk</h1><div class="sub" id="sub">VICTIG Sales Nav scraping</div></div>
+  <nav class="pagetabs"><button id="tabDesk" class="on" onclick="showTab('desk')">Scrape Desk</button><button id="tabInbox" onclick="showTab('inbox')">Inbox Health</button></nav>
   <span class="sp"></span>
-  <span id="mode" class="mode"></span>
-  <button id="btnLive" class="primary"></button>
-  <button id="btnPause"></button>
+  <span id="mode" class="mode deskonly"></span>
+  <button id="btnLive" class="primary deskonly"></button>
+  <button id="btnPause" class="deskonly"></button>
 </header>
-<main>
+<main id="inboxMain" hidden>
+  <div id="inboxBanners" style="display:grid;gap:8px"></div>
+  <div class="kpis" id="inboxKpis"></div>
+  <section class="card">
+    <h2>Sending domains <small id="inboxNote"></small></h2>
+    <div class="filters" id="inboxFilters"></div>
+    <div style="overflow-x:auto"><table id="inboxTable"></table></div>
+    <div class="muted small" style="margin-top:8px" id="inboxFoot"></div>
+  </section>
+</main>
+<main id="deskMain">
   <div id="banners" style="display:grid;gap:8px"></div>
   <div class="kpis" id="kpis"></div>
 
@@ -161,8 +181,8 @@ async function load(){S=await api("/api/state");render()}
 function render(){
   const s=S.settings, br=S.breaker;
   const mode=br?["broken","Stopped: breaker tripped"]:s.paused?["paused","Paused"]:s.dry_run?["dry","Dry run: nothing launches"]:["live","Live"];
-  $("mode").className="mode "+mode[0];$("mode").textContent=mode[1];
-  $("btnLive").textContent=s.dry_run?"Go live":"Back to dry run";$("btnLive").className=s.dry_run?"primary":"";
+  $("mode").className="mode deskonly "+mode[0];$("mode").textContent=mode[1];
+  $("btnLive").textContent=s.dry_run?"Go live":"Back to dry run";$("btnLive").className="deskonly"+(s.dry_run?" primary":"");
   $("btnPause").textContent=s.paused?"Resume":"Pause";
   $("sub").textContent=`Signed in as ${S.user} · scheduler ${S.heartbeat?"beat "+ago(S.heartbeat):"not running"}`;
   // banners
@@ -231,6 +251,32 @@ function clayDup(id){
   if(!dlg.open)dlg.showModal();
 }
 async function clayReplace(id){const u=$("newClayUrl").value.trim();if(!u)return;if(!confirm("Archive the old table and start tracking the new one at 0 rows?"))return;await api(`/api/clay/${id}/replace`,{url:u});dlg.close();load()}
+let TAB="desk", inboxData=null, inboxFilter="all";
+function showTab(t){TAB=t;document.body.classList.toggle("inboxtab",t==="inbox");$("deskMain").hidden=t!=="desk";$("inboxMain").hidden=t!=="inbox";
+  $("tabDesk").classList.toggle("on",t==="desk");$("tabInbox").classList.toggle("on",t==="inbox");history.replaceState(null,"",t==="inbox"?"#inbox":location.pathname);if(t==="inbox")loadInbox()}
+async function loadInbox(){inboxData=await api("/api/inbox");renderInbox()}
+async function inboxSync(){await api("/api/inbox/sync",{});$("inboxNote").textContent="syncing… (takes a couple of minutes)";setTimeout(loadInbox,20000)}
+function renderInbox(){
+  const d=inboxData;if(!d)return;
+  const b=[];
+  if(!d.configured)b.push(`<div class="banner amber">No Bison key yet (BISON_KEY_VICTIG), so there is nothing to read.</div>`);
+  if(d.sync&&d.sync.error)b.push(`<div class="banner red">The last sync failed: ${esc(d.sync.error)}</div>`);
+  $("inboxBanners").innerHTML=b.join("");
+  const c=d.counts;
+  $("inboxKpis").innerHTML=[[fmt(d.domains.length),"Sending domains"],[fmt(c.critical),`Critical (${d.crit_pct}%+ lifetime)`],[fmt(c.warn),`Warning (${d.warn_pct}-${d.crit_pct}%)`],[fmt(d.disconnected),`Mailboxes not connected of ${fmt(d.mailboxes)}`]]
+    .map(([v,l],i)=>`<div class="kpi"><div class="v" style="${i===1&&c.critical?"color:var(--red)":i===2&&c.warn?"color:var(--amber)":""}">${v}</div><div class="l">${l}</div></div>`).join("");
+  $("inboxNote").textContent=d.sync&&d.sync.at?`synced ${ago(d.sync.at)} · ${d.rate==null?"":d.rate+"% lifetime bounce overall"}`:"not synced yet";
+  const f=[["all","All"],["critical","Critical"],["warn","Warning"],["ok","Healthy"],["disc","Has disconnected"]];
+  $("inboxFilters").innerHTML=f.map(([k,l])=>`<button class="${inboxFilter===k?"on":""}" onclick="inboxFilter='${k}';renderInbox()">${l}</button>`).join("")+`<button style="margin-left:auto" onclick="inboxSync()">Sync now</button>`;
+  const rows=d.domains.filter(x=>inboxFilter==="all"||(inboxFilter==="disc"?x.connected<x.mailboxes:x.band===inboxFilter)).map(x=>{
+    const label={critical:"Critical",warn:"Warning",ok:"OK",new:"Too few sends"}[x.band];
+    return `<tr><td><b>${esc(x.domain)}</b></td><td>${x.band==="new"?`<span class="pill new">${label}</span>`:`<span class="pill ${x.band}">${x.rate}%</span>`}</td>
+      <td>${fmt(x.bounced)} <span class="muted small">of ${fmt(x.sent)}</span></td>
+      <td>${x.connected} <span class="muted small">/ ${x.mailboxes}</span>${x.connected<x.mailboxes?` <span class="att small">${x.mailboxes-x.connected} off</span>`:""}</td>
+      <td>${x.warmup} <span class="muted small">warmup on</span></td><td>${esc(x.ht_status||"–")}</td><td class="muted small">${esc(x.created||"")}</td></tr>`}).join("");
+  $("inboxTable").innerHTML=`<tr><th>Domain</th><th>Lifetime bounce</th><th>Bounced / sent</th><th>Mailboxes connected</th><th>Warmup</th><th>Hypertide status</th><th>Ordered</th></tr>${rows||`<tr><td colspan="7" class="muted">Nothing matches.</td></tr>`}`;
+  $("inboxFoot").textContent=`Lifetime rate = bounced ÷ sent for the whole domain, judged once it has ${d.min_sends}+ sends. Read-only: this tab watches and alerts; it doesn't pause, buy or swap anything yet.`+(d.hypertide?"":" (Hypertide key not set: status column empty.)");
+}
 function renderChart(){
   const keys=S.accounts.map(a=>a.key), days=[];
   for(let i=29;i>=0;i--){const d=new Date(S.now_local.slice(0,10)+"T12:00:00");d.setDate(d.getDate()-i);days.push(d.toISOString().slice(0,10))}
@@ -311,7 +357,7 @@ async function drawMap(){
   d3.select("#cty").selectAll("path").attr("fill",fill).select("title").text(f=>{const c=cov[f.id];return `${f.properties.name}: ${!c?"":c[1]==null?"not scraped yet":"scraped "+c[1]+" days ago"}`});
   $("legend").innerHTML=S.regions.map(r=>`<span><span class="dot" style="background:${r.color}"></span>${esc(r.name)}</span>`).join("")+`<span>pale = not scraped this cycle · solid = last 2 weeks</span>`;
 }
-load();setInterval(()=>{if(!dlg.open)load()},30000);
+load();setInterval(()=>{if(!dlg.open)load()},30000);setInterval(()=>{if(TAB==='inbox')loadInbox()},120000);if(location.hash==='#inbox')showTab('inbox');
 </script>
 </body>
 </html>

@@ -29,6 +29,9 @@ PB_API_KEY = os.environ.get("PB_API_KEY", "")
 PB_ORG_ID = os.environ.get("PB_ORG_ID", "3152587389729387")  # "VICTIG Workspace"
 
 BISON_KEY_VICTIG = os.environ.get("BISON_KEY_VICTIG", "")
+BISON_URL = os.environ.get("BISON_URL", "https://send.victig.com")
+HYPERTIDE_API_KEY = os.environ.get("HYPERTIDE_API_KEY", "")
+GOOGLE_CHAT_WEBHOOK = os.environ.get("GOOGLE_CHAT_WEBHOOK", "")   # rev ops space; Slack is the fallback
 SLACK_ALERT_WEBHOOK = os.environ.get("SLACK_ALERT_WEBHOOK", "")
 
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
