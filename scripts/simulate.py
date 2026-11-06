@@ -16,8 +16,22 @@ sys.path.insert(0, str(ROOT))
 os.environ["DATA_DIR"] = tempfile.mkdtemp()
 os.environ["PB_API_KEY"] = "fake"
 os.environ["RUN_SCHEDULER"] = "0"
+# Never let a test touch real services: config would otherwise pick these up from .env.local and the
+# alert tests would post to the real Google Chat space.
+for _k in ("GOOGLE_CHAT_WEBHOOK", "SLACK_ALERT_WEBHOOK", "BISON_KEY_VICTIG", "HYPERTIDE_API_KEY", "ALERTS_MUTED"):
+    os.environ[_k] = ""
+os.environ["PUBLIC_URL"] = "https://desk.example.test"
 
 from app import alerts, clay, config, inbox, pb, runner, seed, slicer, store  # noqa: E402
+
+import requests  # noqa: E402
+
+
+def _no_network(*a, **k):
+    raise RuntimeError("simulate.py must not call the network")
+
+
+requests.get = requests.post = requests.put = requests.patch = requests.delete = requests.request = _no_network
 
 STATE = {"next": 1000, "containers": {}, "script": {}}
 
