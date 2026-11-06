@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS inbox_senders (
   id INTEGER PRIMARY KEY, email TEXT, domain TEXT, status TEXT, warmup INTEGER, daily_limit INTEGER,
   sent INTEGER, bounced INTEGER, replied INTEGER);
 CREATE INDEX IF NOT EXISTS inbox_dom ON inbox_senders(domain);
+CREATE TABLE IF NOT EXISTS inbox_history (
+  day TEXT, domain TEXT, sent INTEGER, bounced INTEGER, mailboxes INTEGER, connected INTEGER,
+  PRIMARY KEY (day, domain));
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, ts TEXT, level TEXT, text TEXT);
 """
 

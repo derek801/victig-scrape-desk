@@ -310,4 +310,18 @@ alerts.requests.post = lambda url, json=None, timeout=0: sent_json.update(json=j
 alerts._post("bad.com is critical", "alert", "/#inbox")
 card = sent_json["json"]["cardsV2"][0]["card"]
 check(card["header"]["title"] == "Scrape Desk" and "buttonList" in card["sections"][0]["widgets"][1], "Google Chat alert is a card with an open button")
+
+# 16. daily snapshots give a trend: older day with a lower rate -> positive points, recent-sends rate
+old_day = (dt.date.fromisoformat(inbox.today()) - dt.timedelta(days=7)).isoformat()
+store.x("DELETE FROM inbox_history")
+store.xmany("INSERT INTO inbox_history(day,domain,sent,bounced,mailboxes,connected) VALUES(?,?,?,?,?,?)",
+            [(old_day, "bad.com", 1000, 20, 10, 10), (old_day, "good.com", 2200, 22, 11, 10)])
+inbox.sync()
+by = {d["domain"]: d for d in inbox.overview()["domains"]}
+check(by["bad.com"]["trend"] and by["bad.com"]["trend"]["pp"] > 1.5 and by["bad.com"]["trend"]["days"] == 7
+      and by["bad.com"]["recent_rate"] is not None, "trend: a worsening domain shows positive points and its recent-sends rate")
+check(by["good.com"]["trend"] and abs(by["good.com"]["trend"]["pp"]) < 0.5, "trend: a steady domain stays flat")
+check(len(store.q("SELECT 1 FROM inbox_history WHERE day=?", (inbox.today(),))) == 4, "one snapshot row per domain per day")
+inbox.sync()
+check(len(store.q("SELECT 1 FROM inbox_history WHERE day=?", (inbox.today(),))) == 4, "a second sync the same day replaces, not duplicates")
 print("all checks passed")

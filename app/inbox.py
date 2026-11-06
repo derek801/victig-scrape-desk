@@ -4,9 +4,11 @@ with Hypertide (orders). Read-only for now: it watches and alerts; nothing is pa
 Lifetime rate = bounced / sent, added up over every mailbox on a domain, judged once the domain has
 `inbox_min_sends` sends. Bison's own bands: under 2% fine, 2-3% warning, 3%+ critical. Whole domains are judged,
 not single mailboxes, because Hypertide replaces by domain and one mailbox's few sends are too noisy."""
+import datetime as dt
 import threading
 import time
 import traceback
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -78,6 +80,7 @@ def sync():
                 store.kv_set("hypertide_orders", fetch_hypertide())
             except Exception as e:           # Hypertide being down must not hide the Bison data
                 store.log(f"inbox: Hypertide lookup failed: {e}", "warn")
+        snapshot()
         store.kv_set("inbox_sync", {"at": store.iso(), "senders": len(rows), "error": None})
         alerts.clear("inbox:sync")
         check()
@@ -90,6 +93,40 @@ def sync():
         return False
     finally:
         _running.release()
+
+
+def today():
+    return dt.datetime.now(ZoneInfo(config.TZ)).date().isoformat()
+
+
+def snapshot():
+    """One row per domain per day (the latest sync of the day wins), so the page can show a trend."""
+    day = today()
+    store.xmany("INSERT OR REPLACE INTO inbox_history(day,domain,sent,bounced,mailboxes,connected) VALUES(?,?,?,?,?,?)",
+                [(day, d["domain"], d["sent"], d["bounced"], d["mailboxes"], d["connected"] or 0) for d in store.q(
+                    "SELECT domain, COUNT(*) mailboxes, SUM(status='Connected') connected, SUM(sent) sent, "
+                    "SUM(bounced) bounced FROM inbox_senders GROUP BY domain")])
+
+
+def _trends(doms, s):
+    """Per domain from the daily snapshots: sparkline of the lifetime rate, the change over about 7 days, and the
+    rate of just the sends in that window (shows whether new sends bounce more than the lifetime average)."""
+    cut = (dt.date.fromisoformat(today()) - dt.timedelta(days=35)).isoformat()
+    hist = {}
+    for r in store.q("SELECT day, domain, sent, bounced FROM inbox_history WHERE day>=? ORDER BY day", (cut,)):
+        hist.setdefault(r["domain"], []).append(r)
+    want = (dt.date.fromisoformat(today()) - dt.timedelta(days=7)).isoformat()
+    for d in doms:
+        pts = hist.get(d["domain"], [])
+        d["spark"] = [round(p["bounced"] / p["sent"] * 100, 2) for p in pts if p["sent"] >= s["inbox_min_sends"]][-30:]
+        d["trend"] = d["recent_rate"] = None
+        old = [p for p in pts if p["day"] <= want] or ([pts[0]] if pts and pts[0]["day"] < today() else [])
+        if old and d["rate"] is not None and old[-1]["sent"] >= s["inbox_min_sends"]:
+            o = old[-1]
+            days = (dt.date.fromisoformat(today()) - dt.date.fromisoformat(o["day"])).days
+            d["trend"] = {"pp": round(d["rate"] - o["bounced"] / o["sent"] * 100, 2), "days": days}
+            if d["sent"] - o["sent"] >= 50:
+                d["recent_rate"] = round((d["bounced"] - o["bounced"]) / (d["sent"] - o["sent"]) * 100, 2)
 
 
 # ---- reading -------------------------------------------------------------------------------------
@@ -111,6 +148,7 @@ def overview():
         o = ht.get(d["domain"], {})
         doms.append({**d, "rate": rate, "band": band(rate, s), "ht_status": o.get("status"), "created": o.get("created")})
     doms.sort(key=lambda x: (-(x["rate"] if x["rate"] is not None else -1), x["domain"]))
+    _trends(doms, s)
     tot = store.q1("SELECT COUNT(*) n, COALESCE(SUM(sent),0) sent, COALESCE(SUM(bounced),0) bounced, "
                    "COALESCE(SUM(status!='Connected'),0) disconnected FROM inbox_senders")
     counts = {b: sum(1 for x in doms if x["band"] == b) for b in ("critical", "warn", "ok", "new")}

@@ -256,6 +256,13 @@ function showTab(t){TAB=t;document.body.classList.toggle("inboxtab",t==="inbox")
   $("tabDesk").classList.toggle("on",t==="desk");$("tabInbox").classList.toggle("on",t==="inbox");history.replaceState(null,"",t==="inbox"?"#inbox":location.pathname);if(t==="inbox")loadInbox()}
 async function loadInbox(){inboxData=await api("/api/inbox");renderInbox()}
 async function inboxSync(){await api("/api/inbox/sync",{});$("inboxNote").textContent="syncing… (takes a couple of minutes)";setTimeout(loadInbox,20000)}
+function spark(v){if(!v||v.length<2)return "";const w=64,h=18,lo=Math.min(...v),hi=Math.max(...v),r=hi-lo||1;
+  const pts=v.map((y,i)=>`${(i/(v.length-1)*w).toFixed(1)},${(h-2-(y-lo)/r*(h-4)).toFixed(1)}`).join(" ");
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="vertical-align:middle"><polyline fill="none" stroke="currentColor" stroke-width="1.5" points="${pts}"/></svg>`}
+function trendCell(x){const t=x.trend;if(!t)return `<span class="muted small">building…</span>`;
+  const up=t.pp>=0.05,down=t.pp<=-0.05,col=up?"var(--red)":down?"var(--green)":"var(--mute)",arrow=up?"▲":down?"▼":"▬";
+  const tip=`${t.days}-day change in the lifetime rate`+(x.recent_rate!=null?`; sends in that period bounced at ${x.recent_rate}%`:"");
+  return `<span title="${esc(tip)}" style="color:${col};white-space:nowrap">${spark(x.spark)} ${arrow} ${t.pp>0?"+":""}${t.pp}</span>`}
 function renderInbox(){
   const d=inboxData;if(!d)return;
   const b=[];
@@ -273,9 +280,9 @@ function renderInbox(){
     return `<tr><td><b>${esc(x.domain)}</b></td><td>${x.band==="new"?`<span class="pill new">${label}</span>`:`<span class="pill ${x.band}">${x.rate}%</span>`}</td>
       <td>${fmt(x.bounced)} <span class="muted small">of ${fmt(x.sent)}</span></td>
       <td>${x.connected} <span class="muted small">/ ${x.mailboxes}</span>${x.connected<x.mailboxes?` <span class="att small">${x.mailboxes-x.connected} off</span>`:""}</td>
-      <td>${x.warmup} <span class="muted small">warmup on</span></td><td>${esc(x.ht_status||"–")}</td><td class="muted small">${esc(x.created||"")}</td></tr>`}).join("");
-  $("inboxTable").innerHTML=`<tr><th>Domain</th><th>Lifetime bounce</th><th>Bounced / sent</th><th>Mailboxes connected</th><th>Warmup</th><th>Hypertide status</th><th>Ordered</th></tr>${rows||`<tr><td colspan="7" class="muted">Nothing matches.</td></tr>`}`;
-  $("inboxFoot").textContent=`Lifetime rate = bounced ÷ sent for the whole domain, judged once it has ${d.min_sends}+ sends. Read-only: this tab watches and alerts; it doesn't pause, buy or swap anything yet.`+(d.hypertide?"":" (Hypertide key not set: status column empty.)");
+      <td>${trendCell(x)}</td><td>${x.warmup} <span class="muted small">warmup on</span></td><td>${esc(x.ht_status||"–")}</td><td class="muted small">${esc(x.created||"")}</td></tr>`}).join("");
+  $("inboxTable").innerHTML=`<tr><th>Domain</th><th>Lifetime bounce</th><th>Bounced / sent</th><th>Mailboxes connected</th><th>Trend (pts)</th><th>Warmup</th><th>Hypertide status</th><th>Ordered</th></tr>${rows||`<tr><td colspan="8" class="muted">Nothing matches.</td></tr>`}`;
+  $("inboxFoot").textContent=`Lifetime rate = bounced ÷ sent for the whole domain, judged once it has ${d.min_sends}+ sends. Trend = change in the lifetime rate over about 7 days, from a daily snapshot (it builds up from the first sync). Read-only: this tab watches and alerts; it doesn't pause, buy or swap anything yet.`+(d.hypertide?"":" (Hypertide key not set: status column empty.)");
 }
 function renderChart(){
   const keys=S.accounts.map(a=>a.key), days=[];
