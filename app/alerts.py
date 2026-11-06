@@ -9,6 +9,10 @@ import requests
 from . import config, store
 
 
+def muted():
+    return config.ALERTS_MUTED or bool(store.settings().get("alerts_muted"))
+
+
 def _url(link):
     return config.PUBLIC_URL.rstrip("/") + (link or "") if config.PUBLIC_URL else ""
 
@@ -42,9 +46,12 @@ def raise_alert(key, text, grace_min=60, remind_h=24, link=""):
     due = (now - first).total_seconds() >= grace_min * 60
     last = dt.datetime.fromisoformat(a["announced"]) if a["announced"] else None
     if due and (last is None or (now - last).total_seconds() >= remind_h * 3600):
-        _post(text, "alert", link)
+        if muted():          # counts as announced, so turning alerts back on resumes the normal reminder cadence
+            store.log(f"ALERT (muted, not sent) {text}", "alert")
+        else:
+            _post(text, "alert", link)
+            store.log(f"ALERT {text}", "alert")
         a["announced"] = store.iso(now)
-        store.log(f"ALERT {text}", "alert")
     open_[key] = a
     store.kv_set("alerts_open", open_)
 
@@ -55,7 +62,7 @@ def clear(key, text=None, quiet=False):
     if a is None:
         return
     store.kv_set("alerts_open", open_)
-    if a.get("announced") and not quiet:
+    if a.get("announced") and not quiet and not muted():
         _post(f"Resolved: {text or a['text']}", "resolved")
 
 

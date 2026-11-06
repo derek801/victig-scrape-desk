@@ -16,8 +16,22 @@ sys.path.insert(0, str(ROOT))
 os.environ["DATA_DIR"] = tempfile.mkdtemp()
 os.environ["PB_API_KEY"] = "fake"
 os.environ["RUN_SCHEDULER"] = "0"
+# Never let a test touch real services: config would otherwise pick these up from .env.local and the
+# alert tests would post to the real Google Chat space.
+for _k in ("GOOGLE_CHAT_WEBHOOK", "SLACK_ALERT_WEBHOOK", "BISON_KEY_VICTIG", "HYPERTIDE_API_KEY", "ALERTS_MUTED"):
+    os.environ[_k] = ""
+os.environ["PUBLIC_URL"] = "https://desk.example.test"
 
 from app import alerts, clay, config, inbox, pb, runner, seed, slicer, store  # noqa: E402
+
+import requests  # noqa: E402
+
+
+def _no_network(*a, **k):
+    raise RuntimeError("simulate.py must not call the network")
+
+
+requests.get = requests.post = requests.put = requests.patch = requests.delete = requests.request = _no_network
 
 STATE = {"next": 1000, "containers": {}, "script": {}}
 
@@ -310,4 +324,38 @@ alerts.requests.post = lambda url, json=None, timeout=0: sent_json.update(json=j
 alerts._post("bad.com is critical", "alert", "/#inbox")
 card = sent_json["json"]["cardsV2"][0]["card"]
 check(card["header"]["title"] == "Scrape Desk" and "buttonList" in card["sections"][0]["widgets"][1], "Google Chat alert is a card with an open button")
+
+# 16. daily snapshots give a trend: older day with a lower rate -> positive points, recent-sends rate
+old_day = (dt.date.fromisoformat(inbox.today()) - dt.timedelta(days=7)).isoformat()
+store.x("DELETE FROM inbox_history")
+store.xmany("INSERT INTO inbox_history(day,domain,sent,bounced,mailboxes,connected) VALUES(?,?,?,?,?,?)",
+            [(old_day, "bad.com", 1000, 20, 10, 10), (old_day, "good.com", 2200, 22, 11, 10)])
+inbox.sync()
+by = {d["domain"]: d for d in inbox.overview()["domains"]}
+check(by["bad.com"]["trend"] and by["bad.com"]["trend"]["pp"] > 1.5 and by["bad.com"]["trend"]["days"] == 7
+      and by["bad.com"]["recent_rate"] is not None, "trend: a worsening domain shows positive points and its recent-sends rate")
+check(by["good.com"]["trend"] and abs(by["good.com"]["trend"]["pp"]) < 0.5, "trend: a steady domain stays flat")
+check(len(store.q("SELECT 1 FROM inbox_history WHERE day=?", (inbox.today(),))) == 4, "one snapshot row per domain per day")
+inbox.sync()
+check(len(store.q("SELECT 1 FROM inbox_history WHERE day=?", (inbox.today(),))) == 4, "a second sync the same day replaces, not duplicates")
+
+# 17. mute: nothing posts while muted, turning it back on does not flood; inbox alerts are scoped to the inbox tab
+importlib.reload(alerts)
+posted2 = []
+alerts._post = lambda text, kind="alert", link="": posted2.append(text) or True
+store.kv_set("alerts_open", {})
+store.save_settings({"alerts_muted": True})
+alerts.raise_alert("inbox:test1", "muted alert one", grace_min=0, link="/#inbox")
+alerts.clear("inbox:test1")
+check(not posted2, "muted: no alert and no resolved message is posted")
+alerts.raise_alert("inbox:test2", "alert raised while muted", grace_min=0, link="/#inbox")
+store.save_settings({"alerts_muted": False})
+alerts.raise_alert("inbox:test2", "alert raised while muted", grace_min=0, link="/#inbox")
+check(not posted2, "unmuting does not re-announce what was raised while muted")
+alerts.raise_alert("inbox:test3", "a new problem after unmuting", grace_min=0, link="/#inbox")
+check(posted2 == ["a new problem after unmuting"], "new problems announce normally after unmuting")
+alerts.raise_alert("acct:max", "a scrape-desk alert", grace_min=60)
+o = inbox.overview()
+check(all("scrape-desk" not in t for t in o["alerts"]) and any("a new problem" in t for t in o["alerts"]),
+      "inbox view only lists inbox alerts")
 print("all checks passed")
