@@ -150,6 +150,7 @@ a{color:var(--blue)}
         <div class="field"><label>Max launches per account per day</label><input type="number" id="ml" min="1" max="6"></div>
         <div class="field"><label>Slice size target (results)</label><input type="number" id="tr" min="300" max="2400" step="100"></div>
         <div class="field"><label>Days before a region can restart</label><input type="number" id="rg" min="0" max="365"></div>
+        <div class="field"><label>Mute chat alerts</label><input type="checkbox" id="mu"> <span class="muted small">nothing posts to Google Chat while on</span></div>
         <div class="field"><label>DoorDash campaign-10 sync</label><input type="checkbox" id="dd"> <span class="muted small" id="ddNote"></span></div>
         <div style="margin-top:14px;display:flex;gap:8px;align-items:center"><button class="primary" id="saveSettings">Save settings</button><span class="muted small" id="saveNote"></span></div>
         <div class="muted small" style="margin-top:10px" id="calNote"></div>
@@ -189,8 +190,9 @@ function render(){
   const b=[];
   if(br)b.push(`<div class="banner red">All launches stopped: ${esc(br.reason)} <button class="danger" onclick="act('/api/breaker/reset',{})">Reset</button></div>`);
   if(!S.pb_key)b.push(`<div class="banner amber">No PhantomBuster API key yet (PB_API_KEY). The desk can plan but can't launch or read runs.</div>`);
-  for(const [k,a] of Object.entries(S.alerts||{}))if(k!=="breaker")b.push(`<div class="banner red">${esc(a.text)}</div>`);
+  for(const [k,a] of Object.entries(S.alerts||{}))if(k!=="breaker"&&!k.startsWith("inbox:"))b.push(`<div class="banner red">${esc(a.text)}</div>`);
   if(S.pb_storage_full)b.push(`<div class="banner amber">PhantomBuster's 100,000-lead storage is full (seen ${ago(S.pb_storage_full)}). Runs still save their CSV, but clear old leads in PhantomBuster → Leads when you can.</div>`);
+  if(S.alerts_muted)b.unshift(muteBanner(S.mute_forced));
   $("banners").innerHTML=b.join("");
   // kpis
   const days=Object.keys(S.daily).sort(), today=S.now_local.slice(0,10);
@@ -263,11 +265,15 @@ function trendCell(x){const t=x.trend;if(!t)return `<span class="muted small">bu
   const up=t.pp>=0.05,down=t.pp<=-0.05,col=up?"var(--red)":down?"var(--green)":"var(--mute)",arrow=up?"▲":down?"▼":"▬";
   const tip=`${t.days}-day change in the lifetime rate`+(x.recent_rate!=null?`; sends in that period bounced at ${x.recent_rate}%`:"");
   return `<span title="${esc(tip)}" style="color:${col};white-space:nowrap">${spark(x.spark)} ${arrow} ${t.pp>0?"+":""}${t.pp}</span>`}
+async function unmute(){await api('/api/settings',{alerts_muted:false});await load();if(TAB==='inbox')loadInbox()}
+function muteBanner(forced){return `<div class="banner amber">Chat alerts are muted: nothing is being posted to Google Chat. ${forced?"Muted from Render (ALERTS_MUTED).":`<button onclick="unmute()">Turn alerts back on</button>`}</div>`}
 function renderInbox(){
   const d=inboxData;if(!d)return;
   const b=[];
   if(!d.configured)b.push(`<div class="banner amber">No Bison key yet (BISON_KEY_VICTIG), so there is nothing to read.</div>`);
   if(d.sync&&d.sync.error)b.push(`<div class="banner red">The last sync failed: ${esc(d.sync.error)}</div>`);
+  (d.alerts||[]).forEach(t=>b.push(`<div class="banner red">${esc(t)}</div>`));
+  if(d.alerts_muted)b.unshift(muteBanner(S&&S.mute_forced));
   $("inboxBanners").innerHTML=b.join("");
   const c=d.counts;
   $("inboxKpis").innerHTML=[[fmt(d.domains.length),"Sending domains"],[fmt(c.critical),`Critical (${d.crit_pct}%+ lifetime)`],[fmt(c.warn),`Warning (${d.warn_pct}-${d.crit_pct}%)`],[fmt(d.disconnected),`Mailboxes not connected of ${fmt(d.mailboxes)}`]]
@@ -336,13 +342,13 @@ function renderSettings(){
   if(document.activeElement&&document.activeElement.closest&&document.activeElement.closest(".settings"))return;
   const s=S.settings;$("titles").value=s.titles.join("\n");$("tzName").textContent=S.tz;
   $("bands").innerHTML=Object.entries(BANDS).map(([k,v])=>`<label><input type="checkbox" value="${k}" ${s.bands.includes(k)?"checked":""}> ${v}</label>`).join("");
-  $("ws").value=s.window_start;$("we").value=s.window_end;$("wk").checked=s.weekdays_only;$("ml").value=s.max_launches_per_day;$("tr").value=s.target_results;$("rg").value=s.regap_days;$("dd").checked=s.doordash_sync;
+  $("ws").value=s.window_start;$("we").value=s.window_end;$("wk").checked=s.weekdays_only;$("ml").value=s.max_launches_per_day;$("tr").value=s.target_results;$("rg").value=s.regap_days;$("dd").checked=s.doordash_sync;$("mu").checked=!!s.alerts_muted;
   const dd=S.doordash;$("ddNote").textContent=!dd.key?"needs BISON_KEY_VICTIG":dd.last?`last run ${ago(dd.last.at)} (exit ${dd.last.code})`:"never run here";
   const c=S.calibration;$("calNote").textContent=c?`Slice sizes are estimated from ${c.runs} past runs (typical miss ${Math.round(c.median_abs_error*100)}%) and corrected after every run.`:"";
 }
 $("saveSettings").onclick=async()=>{
   const p={titles:$("titles").value.split("\n"),bands:[...document.querySelectorAll("#bands input:checked")].map(i=>i.value),window_start:$("ws").value,window_end:$("we").value,
-    weekdays_only:$("wk").checked,max_launches_per_day:+$("ml").value,target_results:+$("tr").value,regap_days:+$("rg").value,doordash_sync:$("dd").checked};
+    weekdays_only:$("wk").checked,max_launches_per_day:+$("ml").value,target_results:+$("tr").value,regap_days:+$("rg").value,doordash_sync:$("dd").checked,alerts_muted:$("mu").checked};
   if(p.doordash_sync&&!S.settings.doordash_sync&&!confirm("Turn on the DoorDash sync here? Turn off the doordash-lead-sync task on Derek's PC at the same time so they don't both run."))return;
   await api("/api/settings",p);$("saveNote").textContent="Saved";setTimeout(()=>$("saveNote").textContent="",2500);document.activeElement.blur();load();
 };

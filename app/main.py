@@ -192,7 +192,7 @@ def state(request: Request):
         "events": store.q("SELECT * FROM events ORDER BY id DESC LIMIT 80"),
         "heartbeat": store.kv_get("heartbeat"), "pb_key": bool(config.PB_API_KEY),
         "pb_storage_full": store.kv_get("pb_storage_full"), "calibration": store.kv_get("calibration"),
-        "in_window": runner.in_window(), "tz": config.TZ, "now_local": runner.local_now().isoformat(timespec="minutes"),
+        "in_window": runner.in_window(), "alerts_muted": alerts.muted(), "mute_forced": config.ALERTS_MUTED, "tz": config.TZ, "now_local": runner.local_now().isoformat(timespec="minutes"),
         "clay": clay.overview(),
         "doordash": {"enabled": s["doordash_sync"], "key": bool(config.BISON_KEY_VICTIG),
                      "last": store.kv_get("doordash_last"), "history": (store.kv_get("doordash_history") or [])[-12:]},
@@ -227,7 +227,7 @@ def region_slices(rid: int, request: Request):
 
 EDITABLE = {"dry_run": bool, "paused": bool, "titles": list, "bands": list, "target_results": int,
             "max_counties_per_slice": int, "window_start": str, "window_end": str, "weekdays_only": bool,
-            "max_launches_per_day": int, "regap_days": int, "doordash_sync": bool}
+            "max_launches_per_day": int, "regap_days": int, "doordash_sync": bool, "alerts_muted": bool}
 
 
 @app.post("/api/settings")

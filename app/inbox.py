@@ -157,7 +157,9 @@ def overview():
             "rate": round(tot["bounced"] / tot["sent"] * 100, 2) if tot["sent"] else None,
             "sync": store.kv_get("inbox_sync"), "configured": bool(config.BISON_KEY_VICTIG),
             "hypertide": bool(config.HYPERTIDE_API_KEY), "min_sends": s["inbox_min_sends"],
-            "warn_pct": s["inbox_warn_pct"], "crit_pct": s["inbox_crit_pct"]}
+            "warn_pct": s["inbox_warn_pct"], "crit_pct": s["inbox_crit_pct"],
+            "alerts": [a["text"] for k, a in alerts.open_alerts().items() if k.startswith("inbox:")],
+            "alerts_muted": alerts.muted()}
 
 
 def check():

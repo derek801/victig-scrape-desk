@@ -324,4 +324,24 @@ check(by["good.com"]["trend"] and abs(by["good.com"]["trend"]["pp"]) < 0.5, "tre
 check(len(store.q("SELECT 1 FROM inbox_history WHERE day=?", (inbox.today(),))) == 4, "one snapshot row per domain per day")
 inbox.sync()
 check(len(store.q("SELECT 1 FROM inbox_history WHERE day=?", (inbox.today(),))) == 4, "a second sync the same day replaces, not duplicates")
+
+# 17. mute: nothing posts while muted, turning it back on does not flood; inbox alerts are scoped to the inbox tab
+importlib.reload(alerts)
+posted2 = []
+alerts._post = lambda text, kind="alert", link="": posted2.append(text) or True
+store.kv_set("alerts_open", {})
+store.save_settings({"alerts_muted": True})
+alerts.raise_alert("inbox:test1", "muted alert one", grace_min=0, link="/#inbox")
+alerts.clear("inbox:test1")
+check(not posted2, "muted: no alert and no resolved message is posted")
+alerts.raise_alert("inbox:test2", "alert raised while muted", grace_min=0, link="/#inbox")
+store.save_settings({"alerts_muted": False})
+alerts.raise_alert("inbox:test2", "alert raised while muted", grace_min=0, link="/#inbox")
+check(not posted2, "unmuting does not re-announce what was raised while muted")
+alerts.raise_alert("inbox:test3", "a new problem after unmuting", grace_min=0, link="/#inbox")
+check(posted2 == ["a new problem after unmuting"], "new problems announce normally after unmuting")
+alerts.raise_alert("acct:max", "a scrape-desk alert", grace_min=60)
+o = inbox.overview()
+check(all("scrape-desk" not in t for t in o["alerts"]) and any("a new problem" in t for t in o["alerts"]),
+      "inbox view only lists inbox alerts")
 print("all checks passed")
