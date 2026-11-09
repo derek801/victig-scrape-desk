@@ -24,7 +24,7 @@ When a region runs out of slices it starts over from the top, once its last cycl
   and stop it. It retries once each morning, so it heals itself once the rep re-syncs.
 - Three accounts in trouble at once, or the PhantomBuster API failing 10 times in a row, trips the
   **breaker**: every launch stops until someone presses Reset.
-- Slack (`SLACK_ALERT_WEBHOOK`) only hears about problems that lasted an hour, plus one "resolved" line.
+- The desk never posts to Chat or Slack. Problems show on the page and in the log, and the Make "RevOps Daily Connection Check" reads them from `GET /api/check` (header `X-Check-Token`).
 - If someone launches a phantom by hand, the desk waits for it to finish and records it.
 
 ## Data
@@ -46,7 +46,7 @@ When a region runs out of slices it starts over from the top, once its last cycl
    - `PB_API_KEY`: PhantomBuster → VICTIG Workspace → Settings → API keys
    - `PUBLIC_URL`: the service URL Render gives you, e.g. `https://victig-scrape-desk.onrender.com`
    - `DESK_PASSWORD`: shared team password, until Google sign-in is set up
-   - `SLACK_ALERT_WEBHOOK`: optional, an incoming webhook for alerts
+   - `DESK_CHECK_TOKEN`: a long random string; the Make daily check sends it to read `/api/check`
    - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`: optional; when set, sign-in is Google, @victig.com only
      (OAuth client type Web, redirect URI `<PUBLIC_URL>/auth/callback`)
    - `BISON_KEY_VICTIG`: optional, for the DoorDash sync job

@@ -1,58 +1,10 @@
-"""Alerts to the rev ops Google Chat space (Slack as fallback), quiet by design (same rules as the List Desk): a problem is a condition re-checked every
-pass; it is announced only after it has lasted `grace_min`, repeated every `remind_h` while it lasts,
-and gets one 'resolved' line if it was announced. Routine activity never leaves the app."""
+"""Alerts, quiet by design: a problem is a condition re-checked every pass; it counts as announced once it has
+lasted `grace_min`, and clearing it logs one 'resolved' line. Nothing here talks to Chat, Slack or any other
+service. Alerts show on the page and in the event log, and the RevOps Daily Connection Check (Make) reads them
+from GET /api/check."""
 import datetime as dt
-import html
 
-import requests
-
-from . import config, store
-
-
-def muted():
-    return config.ALERTS_MUTED or not config.ALERTS_LIVE or bool(store.settings().get("alerts_muted"))
-
-
-_sent = []   # timestamps of recent posts, for the flood guard
-MAX_PER_HOUR = 6
-
-
-def _flooding():
-    t = store.now().timestamp()
-    _sent[:] = [x for x in _sent if t - x < 3600]
-    if len(_sent) >= MAX_PER_HOUR:
-        return True
-    _sent.append(t)
-    return False
-
-
-def _url(link):
-    return config.PUBLIC_URL.rstrip("/") + (link or "") if config.PUBLIC_URL else ""
-
-
-def _post(text, kind="alert", link=""):
-    """Google Chat (rev ops space) when GOOGLE_CHAT_WEBHOOK is set, else Slack, else nothing."""
-    if muted():
-        return False
-    if _flooding():
-        store.log(f"ALERT (flood guard, not sent) {text}", "alert")
-        return False
-    url = _url(link)
-    try:
-        if config.GOOGLE_CHAT_WEBHOOK:
-            widgets = [{"textParagraph": {"text": html.escape(text)}}]
-            if url:
-                widgets.append({"buttonList": {"buttons": [{"text": "Open the Scrape Desk", "onClick": {"openLink": {"url": url}}}]}})
-            card = {"header": {"title": "Scrape Desk", "subtitle": "Resolved" if kind == "resolved" else "Needs attention"},
-                    "sections": [{"widgets": widgets}]}
-            return requests.post(config.GOOGLE_CHAT_WEBHOOK, json={"cardsV2": [{"cardId": "desk", "card": card}]}, timeout=20).ok
-        if config.SLACK_ALERT_WEBHOOK:
-            icon = ":large_green_circle:" if kind == "resolved" else ":red_circle:"
-            tail = f"\n<{url}|Open the Scrape Desk>" if url else ""
-            return requests.post(config.SLACK_ALERT_WEBHOOK, json={"text": f"{icon} *Scrape Desk:* {text}{tail}"}, timeout=20).ok
-    except Exception:
-        return False
-    return False
+from . import store
 
 
 def raise_alert(key, text, grace_min=60, remind_h=24, link=""):
@@ -64,11 +16,7 @@ def raise_alert(key, text, grace_min=60, remind_h=24, link=""):
     due = (now - first).total_seconds() >= grace_min * 60
     last = dt.datetime.fromisoformat(a["announced"]) if a["announced"] else None
     if due and (last is None or (now - last).total_seconds() >= remind_h * 3600):
-        if muted():          # counts as announced, so turning alerts back on resumes the normal reminder cadence
-            store.log(f"ALERT (muted, not sent) {text}", "alert")
-        else:
-            _post(text, "alert", link)
-            store.log(f"ALERT {text}", "alert")
+        store.log(f"ALERT {text}", "alert")
         a["announced"] = store.iso(now)
     open_[key] = a
     store.kv_set("alerts_open", open_)
@@ -80,9 +28,14 @@ def clear(key, text=None, quiet=False):
     if a is None:
         return
     store.kv_set("alerts_open", open_)
-    if a.get("announced") and not quiet and not muted():
-        _post(f"Resolved: {text or a['text']}", "resolved")
+    if a.get("announced") and not quiet:
+        store.log(f"Resolved: {text or a['text']}", "info")
 
 
 def open_alerts():
     return store.kv_get("alerts_open", {})
+
+
+def due_alerts():
+    """Alerts that have outlasted their grace period (what the daily check should report)."""
+    return {k: a for k, a in open_alerts().items() if a.get("announced")}

@@ -14,7 +14,7 @@ user-facing picture; this file is the working knowledge behind it.
 - `app/searchurl.py`: builds/parses Sales Nav people-search URLs
 - `app/pb.py`: PhantomBuster API v2 client + run-log parser
 - `app/geo.py`: fills missing LinkedIn county location ids, slowly
-- `app/alerts.py`: Slack alerts with grace period / reminders / "resolved"
+- `app/alerts.py`: alert state (grace period, "resolved"); posts nowhere. `GET /api/check` (token) exposes them to the Make daily check
 - `app/inbox.py`: Inbox Health tab. Lifetime bounce rate per sending domain from Bison sender emails (+ Hypertide order status), bands 2%/3%, read-only for now; synced every 6h in its own thread; grouped alerts
 - `app/clay.py`: row estimate per Clay table (one per rep, filled by Clay's PhantomBuster pull): set count + profiles scraped since; alerts at 80/90/95% of 50k. Clay has no API to read counts or duplicate tables, so duplicating is a guided manual step
 - `app/seed.py`: first-boot data (regions, accounts, counties, calibration, past runs)
@@ -60,7 +60,7 @@ user-facing picture; this file is the working knowledge behind it.
   Overuse can get a rep's LinkedIn account restricted.
 - A failing step must block its own account and trip the global breaker, never loop. Alert once per
   problem, never per item.
-- Alerts go to the rev ops Google Chat space (`GOOGLE_CHAT_WEBHOOK`), Slack only as fallback.
+- **The desk never posts to Chat or Slack.** Notifications come from the Make scenario "RevOps Daily Connection Check", which reads `/api/check`. Do not add webhooks or any outbound messaging here.
 - Secrets only in env vars (Render dashboard or `.env.local`, which is gitignored). Nothing secret in the repo.
 - After changing runner/slicer: `python scripts/simulate.py` must print "all checks passed".
 

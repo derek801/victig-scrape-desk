@@ -63,7 +63,6 @@ DEFAULT_SETTINGS = {
     "inbox_min_sends": 100,       # a domain is judged on lifetime bounce rate once it has this many sends
     "inbox_warn_pct": 2.0,        # Bison: 2-3% is the warning zone ...
     "inbox_crit_pct": 3.0,        # ... 3%+ is critical (replace)
-    "alerts_muted": False,        # True = nothing is posted to Chat/Slack (alerts still show on the page)
     "doordash_sync": False,       # campaign-10 hygiene job (moved off Derek's PC when switched on)
     "doordash_sync_every_min": 120,
 }

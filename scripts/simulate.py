@@ -301,29 +301,18 @@ config.BISON_KEY_VICTIG = "x"
 inbox.fetch_senders = lambda: fake
 inbox.fetch_hypertide = lambda: {"bad.com": {"status": "NPC", "created": "2025-06-01", "tool": "Email Bison"}}
 config.HYPERTIDE_API_KEY = "y"
-posted = []
-alerts._post = lambda text, kind="alert", link="": posted.append((kind, text, link)) or True
 check(inbox.sync(), "inbox sync runs")
 o = inbox.overview()
 by = {d["domain"]: d for d in o["domains"]}
 check(by["good.com"]["band"] == "ok" and by["warn.com"]["band"] == "warn" and by["bad.com"]["band"] == "critical"
       and by["tiny.com"]["band"] == "new", "lifetime bands: ok <2%, warning 2-3%, critical 3%+, too few sends ignored")
 check(by["bad.com"]["ht_status"] == "NPC" and o["disconnected"] == 1, "Hypertide status joined; disconnected counted")
-texts = [t for _, t, _ in posted]
+texts = [a["text"] for a in alerts.due_alerts().values()]
 check(sum("bad.com is critical" in t for t in texts) == 1 and sum("warning zone" in t for t in texts) == 1
       and sum("not connected" in t for t in texts) == 1, "one alert for the critical domain, one warning digest, one disconnected digest")
-n = len(posted)
+n = len(texts)
 inbox.sync()
-check(len(posted) == n, "a second sync with the same data sends nothing new")
-config.GOOGLE_CHAT_WEBHOOK = "https://chat.googleapis.com/v1/spaces/X/messages?key=k"
-sent_json = {}
-alerts.requests.post = lambda url, json=None, timeout=0: sent_json.update(json=json) or type("R", (), {"ok": True})()
-import importlib
-importlib.reload(alerts)
-alerts.requests.post = lambda url, json=None, timeout=0: sent_json.update(json=json) or type("R", (), {"ok": True})()
-alerts._post("bad.com is critical", "alert", "/#inbox")
-card = sent_json["json"]["cardsV2"][0]["card"]
-check(card["header"]["title"] == "Scrape Desk" and "buttonList" in card["sections"][0]["widgets"][1], "Google Chat alert is a card with an open button")
+check(len(alerts.due_alerts()) == n, "a second sync with the same data adds nothing new")
 
 # 16. daily snapshots give a trend: older day with a lower rate -> positive points, recent-sends rate
 old_day = (dt.date.fromisoformat(inbox.today()) - dt.timedelta(days=7)).isoformat()
@@ -339,23 +328,41 @@ check(len(store.q("SELECT 1 FROM inbox_history WHERE day=?", (inbox.today(),))) 
 inbox.sync()
 check(len(store.q("SELECT 1 FROM inbox_history WHERE day=?", (inbox.today(),))) == 4, "a second sync the same day replaces, not duplicates")
 
-# 17. mute: nothing posts while muted, turning it back on does not flood; inbox alerts are scoped to the inbox tab
-importlib.reload(alerts)
-posted2 = []
-alerts._post = lambda text, kind="alert", link="": posted2.append(text) or True
+# 17. the desk posts nowhere; /api/check hands problems to the Make daily check behind a token
+import types  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
+from app import main as desk  # noqa: E402
+
+check(not hasattr(alerts, "_post") and not hasattr(config, "GOOGLE_CHAT_WEBHOOK") and not hasattr(config, "SLACK_ALERT_WEBHOOK"),
+      "no chat or slack posting code is left in the desk")
+req = lambda t: types.SimpleNamespace(headers={"x-check-token": t} if t is not None else {})  # noqa: E731
+config.DESK_CHECK_TOKEN = ""
+try:
+    desk.api_check(req("anything")); denied = False
+except HTTPException as e:
+    denied = e.status_code == 401
+check(denied, "/api/check refuses everyone while no token is configured")
+config.DESK_CHECK_TOKEN = "t0ken"
+try:
+    desk.api_check(req("wrong")); denied = False
+except HTTPException as e:
+    denied = e.status_code == 401
+check(denied, "/api/check refuses a wrong token")
+r = desk.api_check(req("t0ken"))
+check(not r["ok"] and any("bad.com is critical" in t for t in r["problems"]), "/api/check lists the critical domain for Make")
 store.kv_set("alerts_open", {})
-store.save_settings({"alerts_muted": True})
-alerts.raise_alert("inbox:test1", "muted alert one", grace_min=0, link="/#inbox")
-alerts.clear("inbox:test1")
-check(not posted2, "muted: no alert and no resolved message is posted")
-alerts.raise_alert("inbox:test2", "alert raised while muted", grace_min=0, link="/#inbox")
-store.save_settings({"alerts_muted": False})
-alerts.raise_alert("inbox:test2", "alert raised while muted", grace_min=0, link="/#inbox")
-check(not posted2, "unmuting does not re-announce what was raised while muted")
-alerts.raise_alert("inbox:test3", "a new problem after unmuting", grace_min=0, link="/#inbox")
-check(posted2 == ["a new problem after unmuting"], "new problems announce normally after unmuting")
-alerts.raise_alert("acct:max", "a scrape-desk alert", grace_min=60)
-o = inbox.overview()
-check(all("scrape-desk" not in t for t in o["alerts"]) and any("a new problem" in t for t in o["alerts"]),
-      "inbox view only lists inbox alerts")
+store.kv_set("heartbeat", store.iso())
+store.kv_set("inbox_sync", {"at": store.iso()})
+alerts.raise_alert("acct:max", "Max's phantom is stuck", grace_min=60)
+check(desk.api_check(req("t0ken"))["problems"] == [], "an alert still inside its grace period is not reported")
+alerts.raise_alert("acct:max", "Max's phantom is stuck", grace_min=0)
+check(desk.api_check(req("t0ken"))["problems"] == ["Max's phantom is stuck"], "an alert past its grace period is reported")
+store.kv_set("alerts_open", {})
+check(desk.api_check(req("t0ken"))["ok"], "no problems: ok is true and the list is empty")
+store.kv_set("heartbeat", (store.now() - dt.timedelta(hours=2)).isoformat(timespec="seconds"))
+config.RUN_SCHEDULER = True
+check(any("scheduler" in t for t in desk.api_check(req("t0ken"))["problems"]), "a silent scheduler is itself a problem")
+store.kv_set("heartbeat", store.iso())
+store.kv_set("inbox_sync", {"at": (store.now() - dt.timedelta(hours=20)).isoformat(timespec="seconds")})
+check(any("Inbox Health" in t for t in desk.api_check(req("t0ken"))["problems"]), "a stale Bison sync is a problem")
 print("all checks passed")
