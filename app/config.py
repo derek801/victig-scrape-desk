@@ -31,12 +31,8 @@ PB_ORG_ID = os.environ.get("PB_ORG_ID", "3152587389729387")  # "VICTIG Workspace
 BISON_KEY_VICTIG = os.environ.get("BISON_KEY_VICTIG", "")
 BISON_URL = os.environ.get("BISON_URL", "https://send.victig.com")
 HYPERTIDE_API_KEY = os.environ.get("HYPERTIDE_API_KEY", "")
-# Chat/Slack posts only happen when ALERTS_LIVE=1 is set in Render. Without it nothing is ever sent, even after a
-# database reset or a redeploy. ALERTS_MUTED=1 is an extra hard mute on top.
-ALERTS_LIVE = os.environ.get("ALERTS_LIVE", "") in ("1", "true", "yes")
-ALERTS_MUTED = os.environ.get("ALERTS_MUTED", "") in ("1", "true", "yes")   # hard mute from Render, survives a database reset
-GOOGLE_CHAT_WEBHOOK = os.environ.get("GOOGLE_CHAT_WEBHOOK", "")   # rev ops space; Slack is the fallback
-SLACK_ALERT_WEBHOOK = os.environ.get("SLACK_ALERT_WEBHOOK", "")
+# Token for GET /api/check, the read-only status the Make daily check calls (header X-Check-Token)
+DESK_CHECK_TOKEN = os.environ.get("DESK_CHECK_TOKEN", "")
 
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")

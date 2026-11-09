@@ -25,8 +25,6 @@ services:
         sync: false
       - key: PB_API_KEY
         sync: false
-      - key: SLACK_ALERT_WEBHOOK
-        sync: false
       - key: DESK_PASSWORD
         sync: false
       - key: GOOGLE_CLIENT_ID
@@ -37,7 +35,5 @@ services:
         sync: false
       - key: HYPERTIDE_API_KEY
         sync: false
-      - key: GOOGLE_CHAT_WEBHOOK
-        sync: false
-      - key: ALERTS_LIVE      # leave unset/0 = nothing posts to Chat; set to 1 to go live
+      - key: DESK_CHECK_TOKEN   # read by the Make daily check: GET /api/check with header X-Check-Token
         sync: false

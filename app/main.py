@@ -129,6 +129,37 @@ def healthz():
     return {"ok": True, "heartbeat": hb}
 
 
+HEARTBEAT_MAX_MIN = 20       # the scheduler ticks every 60s; this long without one means it is not running
+INBOX_SYNC_MAX_H = 13        # the Bison sync runs every 6h
+
+
+def _age_min(iso_ts):
+    try:
+        return (store.now() - dt.datetime.fromisoformat(iso_ts)).total_seconds() / 60
+    except Exception:
+        return None
+
+
+@app.get("/api/check")
+def api_check(request: Request):
+    """Read-only status for the RevOps Daily Connection Check (Make). Header X-Check-Token must match
+    DESK_CHECK_TOKEN. `problems` is a list of plain sentences, empty when all is well. A desk that has gone
+    quiet is itself a problem, so silence can never look healthy."""
+    tok = request.headers.get("x-check-token", "")
+    if not config.DESK_CHECK_TOKEN or not secrets.compare_digest(tok, config.DESK_CHECK_TOKEN):
+        raise HTTPException(401, "bad token")
+    problems = [a["text"] for a in alerts.due_alerts().values()]
+    age = _age_min(store.kv_get("heartbeat") or "")
+    if config.RUN_SCHEDULER and (age is None or age > HEARTBEAT_MAX_MIN):
+        problems.append("The Scrape Desk scheduler has not run in over %d minutes." % HEARTBEAT_MAX_MIN)
+    sync = store.kv_get("inbox_sync") or {}
+    sage = _age_min(sync.get("at") or "")
+    if config.BISON_KEY_VICTIG and config.RUN_SCHEDULER and (sage is None or sage > INBOX_SYNC_MAX_H * 60):
+        problems.append("Inbox Health has not synced with EmailBison in over %d hours." % INBOX_SYNC_MAX_H)
+    return {"ok": not problems, "problems": problems, "checked_at": store.iso(),
+            "heartbeat_min_ago": None if age is None else round(age), "inbox_sync_at": sync.get("at")}
+
+
 @app.get("/favicon.png")
 def favicon():
     return FileResponse(STATIC / "favicon.png", headers={"Cache-Control": "public, max-age=86400"})
@@ -192,7 +223,7 @@ def state(request: Request):
         "events": store.q("SELECT * FROM events ORDER BY id DESC LIMIT 80"),
         "heartbeat": store.kv_get("heartbeat"), "pb_key": bool(config.PB_API_KEY),
         "pb_storage_full": store.kv_get("pb_storage_full"), "calibration": store.kv_get("calibration"),
-        "in_window": runner.in_window(), "alerts_muted": alerts.muted(), "mute_forced": config.ALERTS_MUTED or not config.ALERTS_LIVE, "alerts_live": config.ALERTS_LIVE, "tz": config.TZ, "now_local": runner.local_now().isoformat(timespec="minutes"),
+        "in_window": runner.in_window(), "tz": config.TZ, "now_local": runner.local_now().isoformat(timespec="minutes"),
         "clay": clay.overview(),
         "doordash": {"enabled": s["doordash_sync"], "key": bool(config.BISON_KEY_VICTIG),
                      "last": store.kv_get("doordash_last"), "history": (store.kv_get("doordash_history") or [])[-12:]},
@@ -227,7 +258,7 @@ def region_slices(rid: int, request: Request):
 
 EDITABLE = {"dry_run": bool, "paused": bool, "titles": list, "bands": list, "target_results": int,
             "max_counties_per_slice": int, "window_start": str, "window_end": str, "weekdays_only": bool,
-            "max_launches_per_day": int, "regap_days": int, "doordash_sync": bool, "alerts_muted": bool}
+            "max_launches_per_day": int, "regap_days": int, "doordash_sync": bool}
 
 
 @app.post("/api/settings")
