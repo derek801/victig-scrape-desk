@@ -266,7 +266,7 @@ function trendCell(x){const t=x.trend;if(!t)return `<span class="muted small">bu
   const tip=`${t.days}-day change in the lifetime rate`+(x.recent_rate!=null?`; sends in that period bounced at ${x.recent_rate}%`:"");
   return `<span title="${esc(tip)}" style="color:${col};white-space:nowrap">${spark(x.spark)} ${arrow} ${t.pp>0?"+":""}${t.pp}</span>`}
 async function unmute(){await api('/api/settings',{alerts_muted:false});await load();if(TAB==='inbox')loadInbox()}
-function muteBanner(forced){return `<div class="banner amber">Chat alerts are muted: nothing is being posted to Google Chat. ${forced?"Muted from Render (ALERTS_MUTED).":`<button onclick="unmute()">Turn alerts back on</button>`}</div>`}
+function muteBanner(forced){return `<div class="banner amber">Chat alerts are muted: nothing is being posted to Google Chat. ${forced?"Switched off in Render: set ALERTS_LIVE=1 there to allow posts.":`<button onclick="unmute()">Turn alerts back on</button>`}</div>`}
 function renderInbox(){
   const d=inboxData;if(!d)return;
   const b=[];

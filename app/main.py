@@ -192,7 +192,7 @@ def state(request: Request):
         "events": store.q("SELECT * FROM events ORDER BY id DESC LIMIT 80"),
         "heartbeat": store.kv_get("heartbeat"), "pb_key": bool(config.PB_API_KEY),
         "pb_storage_full": store.kv_get("pb_storage_full"), "calibration": store.kv_get("calibration"),
-        "in_window": runner.in_window(), "alerts_muted": alerts.muted(), "mute_forced": config.ALERTS_MUTED, "tz": config.TZ, "now_local": runner.local_now().isoformat(timespec="minutes"),
+        "in_window": runner.in_window(), "alerts_muted": alerts.muted(), "mute_forced": config.ALERTS_MUTED or not config.ALERTS_LIVE, "alerts_live": config.ALERTS_LIVE, "tz": config.TZ, "now_local": runner.local_now().isoformat(timespec="minutes"),
         "clay": clay.overview(),
         "doordash": {"enabled": s["doordash_sync"], "key": bool(config.BISON_KEY_VICTIG),
                      "last": store.kv_get("doordash_last"), "history": (store.kv_get("doordash_history") or [])[-12:]},

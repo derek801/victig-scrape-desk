@@ -10,7 +10,20 @@ from . import config, store
 
 
 def muted():
-    return config.ALERTS_MUTED or bool(store.settings().get("alerts_muted"))
+    return config.ALERTS_MUTED or not config.ALERTS_LIVE or bool(store.settings().get("alerts_muted"))
+
+
+_sent = []   # timestamps of recent posts, for the flood guard
+MAX_PER_HOUR = 6
+
+
+def _flooding():
+    t = store.now().timestamp()
+    _sent[:] = [x for x in _sent if t - x < 3600]
+    if len(_sent) >= MAX_PER_HOUR:
+        return True
+    _sent.append(t)
+    return False
 
 
 def _url(link):
@@ -19,6 +32,11 @@ def _url(link):
 
 def _post(text, kind="alert", link=""):
     """Google Chat (rev ops space) when GOOGLE_CHAT_WEBHOOK is set, else Slack, else nothing."""
+    if muted():
+        return False
+    if _flooding():
+        store.log(f"ALERT (flood guard, not sent) {text}", "alert")
+        return False
     url = _url(link)
     try:
         if config.GOOGLE_CHAT_WEBHOOK:

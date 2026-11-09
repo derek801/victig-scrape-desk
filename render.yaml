@@ -39,3 +39,5 @@ services:
         sync: false
       - key: GOOGLE_CHAT_WEBHOOK
         sync: false
+      - key: ALERTS_LIVE      # leave unset/0 = nothing posts to Chat; set to 1 to go live
+        sync: false
