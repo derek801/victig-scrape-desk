@@ -138,6 +138,14 @@ def band(rate, s=None):
     return "critical" if rate >= s["inbox_crit_pct"] else "warn" if rate >= s["inbox_warn_pct"] else "ok"
 
 
+def reply_band(rate, s=None):
+    """Reply rate is the headline health signal: a LOW rate is bad (the opposite of bounce)."""
+    s = s or store.settings()
+    if rate is None:
+        return "new"
+    return "critical" if rate < s["inbox_reply_crit_pct"] else "warn" if rate < s["inbox_reply_warn_pct"] else "ok"
+
+
 def overview():
     s = store.settings()
     ht = store.kv_get("hypertide_orders") or {}
@@ -146,15 +154,24 @@ def overview():
                      "SUM(sent) sent, SUM(bounced) bounced, SUM(replied) replied FROM inbox_senders GROUP BY domain"):
         rate = round(d["bounced"] / d["sent"] * 100, 2) if d["sent"] >= s["inbox_min_sends"] else None
         o = ht.get(d["domain"], {})
-        doms.append({**d, "rate": rate, "band": band(rate, s), "ht_status": o.get("status"), "created": o.get("created")})
-    doms.sort(key=lambda x: (-(x["rate"] if x["rate"] is not None else -1), x["domain"]))
+        rr = round((d["replied"] or 0) / d["sent"] * 100, 2) if d["sent"] >= s["inbox_reply_min_sends"] else None
+        doms.append({**d, "rate": rate, "band": band(rate, s), "reply_rate": rr, "reply_band": reply_band(rr, s),
+                     "ht_status": o.get("status"), "created": o.get("created")})
+    # headline order: lowest reply rate first (domains with too few sends last), then worst bounce
+    doms.sort(key=lambda x: (x["reply_rate"] is None, x["reply_rate"] if x["reply_rate"] is not None else 0,
+                             -(x["rate"] if x["rate"] is not None else -1), x["domain"]))
     _trends(doms, s)
     tot = store.q1("SELECT COUNT(*) n, COALESCE(SUM(sent),0) sent, COALESCE(SUM(bounced),0) bounced, "
                    "COALESCE(SUM(status!='Connected'),0) disconnected FROM inbox_senders")
     counts = {b: sum(1 for x in doms if x["band"] == b) for b in ("critical", "warn", "ok", "new")}
+    reply_counts = {b: sum(1 for x in doms if x["reply_band"] == b) for b in ("critical", "warn", "ok", "new")}
+    tot_replied = store.q1("SELECT COALESCE(SUM(replied),0) r FROM inbox_senders")["r"]
     return {"domains": doms, "counts": counts, "mailboxes": tot["n"], "disconnected": tot["disconnected"],
             "sent": tot["sent"], "bounced": tot["bounced"],
             "rate": round(tot["bounced"] / tot["sent"] * 100, 2) if tot["sent"] else None,
+            "reply_rate": round(tot_replied / tot["sent"] * 100, 2) if tot["sent"] else None, "reply_counts": reply_counts,
+            "reply_warn_pct": s["inbox_reply_warn_pct"], "reply_crit_pct": s["inbox_reply_crit_pct"],
+            "reply_min_sends": s["inbox_reply_min_sends"],
             "sync": store.kv_get("inbox_sync"), "configured": bool(config.BISON_KEY_VICTIG),
             "hypertide": bool(config.HYPERTIDE_API_KEY), "min_sends": s["inbox_min_sends"],
             "warn_pct": s["inbox_warn_pct"], "crit_pct": s["inbox_crit_pct"],
