@@ -63,6 +63,9 @@ DEFAULT_SETTINGS = {
     "inbox_min_sends": 100,       # a domain is judged on lifetime bounce rate once it has this many sends
     "inbox_warn_pct": 2.0,        # Bison: 2-3% is the warning zone ...
     "inbox_crit_pct": 3.0,        # ... 3%+ is critical (replace)
+    "inbox_reply_min_sends": 500, # reply rate is judged once a domain has this many sends (replies are rare)
+    "inbox_reply_warn_pct": 1.0,  # reply rate: lower is worse. Under 1.0% is the warning zone ...
+    "inbox_reply_crit_pct": 0.6,  # ... under 0.6% is critical. (Fleet median is about 1.3%, overall about 1.05%.)
     "doordash_sync": False,       # campaign-10 hygiene job (moved off Derek's PC when switched on)
     "doordash_sync_every_min": 120,
 }

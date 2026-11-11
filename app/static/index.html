@@ -271,19 +271,23 @@ function renderInbox(){
   (d.alerts||[]).forEach(t=>b.push(`<div class="banner red">${esc(t)}</div>`));
   $("inboxBanners").innerHTML=b.join("");
   const c=d.counts;
-  $("inboxKpis").innerHTML=[[fmt(d.domains.length),"Sending domains"],[fmt(c.critical),`Critical (${d.crit_pct}%+ lifetime)`],[fmt(c.warn),`Warning (${d.warn_pct}-${d.crit_pct}%)`],[fmt(d.disconnected),`Mailboxes not connected of ${fmt(d.mailboxes)}`]]
-    .map(([v,l],i)=>`<div class="kpi"><div class="v" style="${i===1&&c.critical?"color:var(--red)":i===2&&c.warn?"color:var(--amber)":""}">${v}</div><div class="l">${l}</div></div>`).join("");
+  const rc=d.reply_counts||{};
+  $("inboxKpis").innerHTML=[[fmt(d.domains.length),"Sending domains"],[d.reply_rate==null?"–":d.reply_rate+"%","Reply rate overall (lifetime)"],[fmt((rc.critical||0)+(rc.warn||0)),`Low reply (under ${d.reply_warn_pct}%)`],[fmt(c.critical),`Bounce critical (${d.crit_pct}%+)`],[fmt(d.disconnected),`Mailboxes not connected of ${fmt(d.mailboxes)}`]]
+    .map(([v,l],i)=>`<div class="kpi"><div class="v" style="${i===2&&(rc.critical)?"color:var(--red)":i===2&&rc.warn?"color:var(--amber)":i===3&&c.critical?"color:var(--red)":""}">${v}</div><div class="l">${l}</div></div>`).join("");
   $("inboxNote").textContent=d.sync&&d.sync.at?`synced ${ago(d.sync.at)} · ${d.rate==null?"":d.rate+"% lifetime bounce overall"}`:"not synced yet";
-  const f=[["all","All"],["critical","Critical"],["warn","Warning"],["ok","Healthy"],["disc","Has disconnected"]];
+  const f=[["all","All"],["lowreply","Low reply"],["critical","Bounce critical"],["warn","Bounce warning"],["ok","Bounce healthy"],["disc","Has disconnected"]];
   $("inboxFilters").innerHTML=f.map(([k,l])=>`<button class="${inboxFilter===k?"on":""}" onclick="inboxFilter='${k}';renderInbox()">${l}</button>`).join("")+`<button style="margin-left:auto" onclick="inboxSync()">Sync now</button>`;
-  const rows=d.domains.filter(x=>inboxFilter==="all"||(inboxFilter==="disc"?x.connected<x.mailboxes:x.band===inboxFilter)).map(x=>{
+  const rows=d.domains.filter(x=>inboxFilter==="all"||(inboxFilter==="disc"?x.connected<x.mailboxes:inboxFilter==="lowreply"?(x.reply_band==="critical"||x.reply_band==="warn"):x.band===inboxFilter)).map(x=>{
     const label={critical:"Critical",warn:"Warning",ok:"OK",new:"Too few sends"}[x.band];
-    return `<tr><td><b>${esc(x.domain)}</b></td><td>${x.band==="new"?`<span class="pill new">${label}</span>`:`<span class="pill ${x.band}">${x.rate}%</span>`}</td>
+    const rl={critical:"Critical",warn:"Warning",ok:"OK",new:"Too few sends"}[x.reply_band];
+    return `<tr><td><b>${esc(x.domain)}</b></td><td>${x.reply_band==="new"?`<span class="pill new">${rl}</span>`:`<span class="pill ${x.reply_band}" title="Lower is worse">${x.reply_rate}%</span>`}</td>
+      <td>${fmt(x.replied||0)} <span class="muted small">of ${fmt(x.sent)}</span></td>
+      <td>${x.band==="new"?`<span class="pill new">${label}</span>`:`<span class="pill ${x.band}">${x.rate}%</span>`}</td>
       <td>${fmt(x.bounced)} <span class="muted small">of ${fmt(x.sent)}</span></td>
       <td>${x.connected} <span class="muted small">/ ${x.mailboxes}</span>${x.connected<x.mailboxes?` <span class="att small">${x.mailboxes-x.connected} off</span>`:""}</td>
       <td>${trendCell(x)}</td><td>${x.warmup} <span class="muted small">warmup on</span></td><td>${esc(x.ht_status||"–")}</td><td class="muted small">${esc(x.created||"")}</td></tr>`}).join("");
-  $("inboxTable").innerHTML=`<tr><th>Domain</th><th>Lifetime bounce</th><th>Bounced / sent</th><th>Mailboxes connected</th><th>Trend (pts)</th><th>Warmup</th><th>Hypertide status</th><th>Ordered</th></tr>${rows||`<tr><td colspan="8" class="muted">Nothing matches.</td></tr>`}`;
-  $("inboxFoot").textContent=`Lifetime rate = bounced ÷ sent for the whole domain, judged once it has ${d.min_sends}+ sends. Trend = change in the lifetime rate over about 7 days, from a daily snapshot (it builds up from the first sync). Read-only: this tab watches and alerts; it doesn't pause, buy or swap anything yet.`+(d.hypertide?"":" (Hypertide key not set: status column empty.)");
+  $("inboxTable").innerHTML=`<tr><th>Domain</th><th>Reply rate</th><th>Replies / sent</th><th>Lifetime bounce</th><th>Bounced / sent</th><th>Mailboxes connected</th><th>Trend (pts)</th><th>Warmup</th><th>Hypertide status</th><th>Ordered</th></tr>${rows||`<tr><td colspan="10" class="muted">Nothing matches.</td></tr>`}`;
+  $("inboxFoot").textContent=`Reply rate = replies ÷ sends for the whole domain (the headline signal: lower is worse; judged once it has ${d.reply_min_sends}+ sends; under ${d.reply_warn_pct}% warning, under ${d.reply_crit_pct}% critical). Sorted lowest reply rate first. Lifetime bounce = bounced ÷ sent, judged once it has ${d.min_sends}+ sends. Trend = change in the lifetime rate over about 7 days, from a daily snapshot (it builds up from the first sync). Read-only: this tab watches and alerts; it doesn't pause, buy or swap anything yet.`+(d.hypertide?"":" (Hypertide key not set: status column empty.)");
 }
 function renderChart(){
   const keys=S.accounts.map(a=>a.key), days=[];

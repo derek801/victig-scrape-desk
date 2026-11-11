@@ -289,12 +289,12 @@ clay.update(t2["id"], {"rows": 100})
 check(not clay.held("max") and runner.due(store.q1("SELECT * FROM accounts WHERE key='max'")), "hold lifts once the count is back down")
 
 # 15. Inbox Health: lifetime bounce per domain, bands, grouped alerts, Google Chat card
-def mk(i, dom, sent, bounced, status="Connected"):
+def mk(i, dom, sent, bounced, status="Connected", replied=0):
     return {"id": i, "email": f"u{i}@{dom}", "status": status, "warmup_enabled": True, "daily_limit": 5,
-            "emails_sent_count": sent, "bounced_count": bounced, "total_replied_count": 0}
+            "emails_sent_count": sent, "bounced_count": bounced, "total_replied_count": replied}
 
 
-fake = ([mk(i, "good.com", 200, 2) for i in range(10)] + [mk(100 + i, "warn.com", 200, 5) for i in range(10)]
+fake = ([mk(i, "good.com", 200, 2, replied=4) for i in range(10)] + [mk(100 + i, "warn.com", 200, 5, replied=2 if i < 6 else 1) for i in range(10)]
         + [mk(200 + i, "bad.com", 200, 8) for i in range(10)] + [mk(300 + i, "tiny.com", 10, 5) for i in range(3)]
         + [mk(400, "good.com", 200, 2, "Not connected")])
 config.BISON_KEY_VICTIG = "x"
@@ -306,6 +306,13 @@ o = inbox.overview()
 by = {d["domain"]: d for d in o["domains"]}
 check(by["good.com"]["band"] == "ok" and by["warn.com"]["band"] == "warn" and by["bad.com"]["band"] == "critical"
       and by["tiny.com"]["band"] == "new", "lifetime bands: ok <2%, warning 2-3%, critical 3%+, too few sends ignored")
+check(by["good.com"]["reply_band"] == "ok" and by["warn.com"]["reply_band"] == "warn" and by["bad.com"]["reply_band"] == "critical"
+      and by["tiny.com"]["reply_band"] == "new", "reply bands: lower is worse (ok >=1.0%, warning 0.6-1.0%, critical <0.6%, too few sends ignored)")
+check(by["good.com"]["reply_rate"] == 1.82 and by["warn.com"]["reply_rate"] == 0.8 and by["bad.com"]["reply_rate"] == 0.0,
+      "reply rate = replies / sends for the whole domain")
+check([d["domain"] for d in o["domains"]] == ["bad.com", "warn.com", "good.com", "tiny.com"],
+      "domains sort by lowest reply rate first, too-few-sends last")
+check(o["reply_rate"] is not None and o["reply_counts"] == {"critical": 1, "warn": 1, "ok": 1, "new": 1}, "overall reply rate and band counts")
 check(by["bad.com"]["ht_status"] == "NPC" and o["disconnected"] == 1, "Hypertide status joined; disconnected counted")
 texts = [a["text"] for a in alerts.due_alerts().values()]
 check(sum("bad.com is critical" in t for t in texts) == 1 and sum("warning zone" in t for t in texts) == 1
