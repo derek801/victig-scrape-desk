@@ -75,7 +75,7 @@ DEFAULT_SETTINGS = {
     "bench_target": 5,            # warmed, DNS-verified spare domains to keep ready
     "bench_autobuy": False,       # the desk may order bench domains in Hypertide (also needs rotation_mode=live). OFF until a person turns it on
     "bench_order_max_per_day": 5, # never order more than this many domains in a day (only ever tops the bench up to bench_target)
-    "bench_forwarding_domain": "victig.com",
+    "bench_forwarding_domain": "www.victig.com",
     "bench_client_name": "VICTIG",
     "bench_sender_names": ["Josh Diederich", "Morgan Verhoef", "Stephen Treanor"],  # every new bench domain's mailboxes are split evenly across these names
     "bench_inbox_quantity": 50,   # Hypertide: 25 or 50 (creates +2 spare mailboxes)

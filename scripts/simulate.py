@@ -505,7 +505,7 @@ store.save_settings({"bench_sender_names": ["Jane Smith", "Alex Doe"]})
 config.BISON_LOGIN_EMAIL, config.BISON_LOGIN_PASSWORD, config.BISON_WORKSPACE = "ops@example.test", "pw", "ws"
 rotation.run_cycle(FakeBison(), empty)
 check(len(placed) == 1 and len(placed[0]["domains"]) == 2 and placed[0]["plan"] == "entra" and placed[0]["selected_tool"] == "bison"
-      and placed[0]["forwarding_domain"] == "victig.com" and placed[0]["users"][0] == {"first_name": "Jane", "last_name": "Smith"},
+      and placed[0]["forwarding_domain"] == "www.victig.com" and placed[0]["users"][0] == {"first_name": "Jane", "last_name": "Smith"},
       "live + autobuy: one bulk Microsoft order for exactly the shortfall, Bison tool, victig.com forwarding")
 check(all(o["paid"] for o in store.kv_get("bench_orders")) and len(store.kv_get("bench_orders")) == 2, "orders are recorded and marked paid")
 rotation.run_cycle(FakeBison(), empty)
