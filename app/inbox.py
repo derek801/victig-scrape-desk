@@ -251,7 +251,7 @@ def _health(doms, s):
     lifetime; the fleet baseline for reply rate is the whole fleet's lifetime rates."""
     tot = store.q1("SELECT COALESCE(SUM(sent),0) sent, COALESCE(SUM(replied),0) replied, COALESCE(SUM(interested),0) i "
                    "FROM inbox_senders")
-    fleet = {"reply_rate": tot["replied"] / tot["sent"] * 100 if tot["sent"] else None,
+    fleet = {"reply_good_pct": s.get("inbox_reply_good_pct"), "reply_rate": tot["replied"] / tot["sent"] * 100 if tot["sent"] else None,
              "positive_rate": tot["i"] / tot["sent"] * 100 if tot["sent"] else None}
     cut = (dt.date.fromisoformat(today()) - dt.timedelta(days=40)).isoformat()
     hist = {}
@@ -333,7 +333,9 @@ def loop():
             last = (store.kv_get("inbox_sync") or {}).get("at")
             import datetime as dt
             if not last or (store.now() - dt.datetime.fromisoformat(last)).total_seconds() >= SYNC_EVERY_S:
-                sync()
+                if sync():
+                    from . import rotation          # after every good sync: plan (dry) or do (live) any needed swaps
+                    rotation.run_cycle()
         except Exception:
             store.log("inbox loop crashed: " + traceback.format_exc()[-400:], "error")
         time.sleep(600)

@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS inbox_history (
   day TEXT, domain TEXT, sent INTEGER, bounced INTEGER, mailboxes INTEGER, connected INTEGER,
   replied INTEGER, interested INTEGER, score REAL, zone TEXT,
   PRIMARY KEY (day, domain));
+CREATE TABLE IF NOT EXISTS rotation_log (
+  id INTEGER PRIMARY KEY, ts TEXT, run TEXT, mode TEXT, step TEXT, domain TEXT, ok INTEGER, detail TEXT);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, ts TEXT, level TEXT, text TEXT);
 """
 
@@ -67,7 +69,13 @@ DEFAULT_SETTINGS = {
     "inbox_reply_min_sends": 500, # reply rate is judged once a domain has this many sends (replies are rare)
     "inbox_reply_warn_pct": 1.0,  # reply rate: lower is worse. Under 1.0% is the warning zone ...
     "inbox_window_min_sends": 200, # a 7/14-day health window needs this many sends, else the lifetime numbers are used
+    "rotation_mode": "dry",       # off | dry (plan and log only) | live (really swaps in Bison). Stays dry until a person flips it
+    "rotation_daily_cap": 1,      # at most this many live swaps per day
+    "rotation_mass_limit": 5,     # more than this many domains in Retire at once = stop and tell the team (bad list, not burnt domains)
+    "bench_target": 5,            # warmed, DNS-verified spare domains to keep ready
+    "bench_min_score": 70,        # Hypertide recoveryHealth score a bench domain needs (scale unverified; tune after seeing real ones)
     "health_weights": {},          # overrides for app/health.py DEFAULT_WEIGHTS, e.g. {"reply": 35}
+    "inbox_reply_good_pct": 1.0,  # the team's goal: 1% reply rate or more is good; the health score's reply signal hits 100 here
     "inbox_reply_crit_pct": 0.6,  # ... under 0.6% is critical. (Fleet median is about 1.3%, overall about 1.05%.)
     "doordash_sync": False,       # campaign-10 hygiene job (moved off Derek's PC when switched on)
     "doordash_sync_every_min": 120,
