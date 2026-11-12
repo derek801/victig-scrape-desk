@@ -166,13 +166,14 @@ def run_cycle(bison=None, hyper=None, force_dry=False):
         life = lifecycle()
         retire = [d for d in o["domains"] if d["health"]["zone"] == "retire"
                   and life.get(d["domain"], {}).get("state") not in ("resting", "decommissioned")]
+        result["retire"] = [d["domain"] for d in retire]
+        result["mass_limit"] = s["rotation_mass_limit"]
         if len(retire) > s["rotation_mass_limit"]:
             alerts.raise_alert(MASS_KEY, f"{len(retire)} domains hit Retire at once, so rotation stopped (that pattern usually means a bad "
                                "list or bad copy, not burnt domains). Nothing was swapped.", grace_min=0, remind_h=24, link="/#inbox")
             log(run, mode, "mass_stop", None, False, {"retire": len(retire), "limit": s["rotation_mass_limit"]})
             result["skipped"] = "mass"
             return result
-        result["retire"] = [d["domain"] for d in retire]
         alerts.clear(MASS_KEY)
         allb = bench(hyper, fresh_dns=bool(retire))
         b = [x for x in allb if x["ready"]]
