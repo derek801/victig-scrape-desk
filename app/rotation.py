@@ -18,10 +18,10 @@ import time
 
 import requests
 
-from . import alerts, config, inbox, store
+from . import alerts, config, inbox, ordering, store
 
-NEEDS_PERSON = ["Buy new bench domains (Hypertide order + payment): not automated until a spend cap and the order "
-                "schema are verified", "Cancel or decommission a retired domain's Hypertide subscription",
+NEEDS_PERSON = ["Buy new bench domains: the desk can order them, but only when bench_autobuy is switched on and rotation is live "
+                "(until then a person orders them in Hypertide)", "Cancel or decommission a retired domain's Hypertide subscription",
                 "Registrar nameserver changes for domains Hypertide does not manage"]
 WARM_MIN = 85                      # average Bison warm-up score a replacement's mailboxes need
 ERR_KEY = "inbox:rotation:error"
@@ -105,9 +105,15 @@ def bench(hyper=None, fresh_dns=False):
         senders.setdefault(r["domain"], []).append(r)
     dns = store.kv_get("inbox_dns") or {}
     out = []
-    for p in hyper.pool():
-        if p["status"] == "cancelled":
+    base = [{**p, "source": "pool"} for p in hyper.pool() if p["status"] != "cancelled"]
+    seen = {p["domain"] for p in base}
+    for o in store.kv_get("bench_orders") or []:         # domains the desk ordered itself (not in the recovery pool)
+        if o["domain"] in seen:
             continue
+        age = (store.now() - dt.datetime.fromisoformat(o["at"])).days
+        st = "payment_pending" if not o.get("paid") else "ready" if age >= s["bench_min_days"] else "warming_up"
+        base.append({"domain": o["domain"], "status": st, "score": None, "eligible_at": None, "source": "ordered", "age": age})
+    for p in base:
         rows = [x for x in senders.get(p["domain"], []) if x["status"] == "Connected"]
         scores = [x["warmup_score"] for x in rows if x["warmup_score"] is not None]
         warm = sum(scores) / len(scores) if scores else None
@@ -115,8 +121,8 @@ def bench(hyper=None, fresh_dns=False):
         dns_ok = bool(d.get("spf") and d.get("dmarc") and d.get("mx") and not d.get("error"))
         reason = None
         if p["status"] != "ready":
-            reason = "still " + str(p["status"]).replace("_", " ")
-        elif p["score"] is None or p["score"] < s["bench_min_score"]:
+            reason = "still " + str(p["status"]).replace("_", " ") + (f" (ordered {p['age']} days ago)" if p.get("age") is not None else "")
+        elif p["source"] == "pool" and (p["score"] is None or p["score"] < s["bench_min_score"]):
             reason = f"recovery score {p['score']} under {s['bench_min_score']}"
         elif not rows:
             reason = "no connected mailboxes in Bison yet"
@@ -169,6 +175,9 @@ def run_cycle(bison=None, hyper=None):
         b = [x for x in allb if x["ready"]]
         store.kv_set("bench_ready", {"n": len(b), "at": store.iso()})
         if not retire:
+            alerts.clear(EMPTY_KEY)
+            if len(b) < s["bench_target"]:
+                ordering.top_up(run, live, allb)
             _finish_ok(run, mode)
             return result
         room = s["rotation_daily_cap"] - swaps_today()
@@ -190,7 +199,8 @@ def run_cycle(bison=None, hyper=None):
             result["swaps"].append(_swap(run, live, bison, d, repl, life))
         left = len(b)
         if left < s["bench_target"]:
-            log(run, mode, "refill_needed", None, True, {"ready_left": left, "target": s["bench_target"], "needs": "a person orders domains"})
+            log(run, mode, "refill_needed", None, True, {"ready_left": left, "target": s["bench_target"]})
+            ordering.top_up(run, live, allb)
         _finish_ok(run, mode)
     except Exception as e:
         store.log("rotation error: " + str(e)[:200], "error")
