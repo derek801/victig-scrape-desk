@@ -333,7 +333,9 @@ def loop():
             last = (store.kv_get("inbox_sync") or {}).get("at")
             import datetime as dt
             if not last or (store.now() - dt.datetime.fromisoformat(last)).total_seconds() >= SYNC_EVERY_S:
-                sync()
+                if sync():
+                    from . import rotation          # after every good sync: plan (dry) or do (live) any needed swaps
+                    rotation.run_cycle()
         except Exception:
             store.log("inbox loop crashed: " + traceback.format_exc()[-400:], "error")
         time.sleep(600)
