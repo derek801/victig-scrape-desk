@@ -31,6 +31,10 @@ PB_ORG_ID = os.environ.get("PB_ORG_ID", "3152587389729387")  # "VICTIG Workspace
 BISON_KEY_VICTIG = os.environ.get("BISON_KEY_VICTIG", "")
 BISON_URL = os.environ.get("BISON_URL", "https://send.victig.com")
 HYPERTIDE_API_KEY = os.environ.get("HYPERTIDE_API_KEY", "")
+# Login Hypertide needs to wire NEW mailboxes into Bison when the desk orders bench domains (Render env only)
+BISON_LOGIN_EMAIL = os.environ.get("BISON_LOGIN_EMAIL", "")
+BISON_LOGIN_PASSWORD = os.environ.get("BISON_LOGIN_PASSWORD", "")
+BISON_WORKSPACE = os.environ.get("BISON_WORKSPACE", "")
 # Token for GET /api/check, the read-only status the Make daily check calls (header X-Check-Token)
 DESK_CHECK_TOKEN = os.environ.get("DESK_CHECK_TOKEN", "")
 

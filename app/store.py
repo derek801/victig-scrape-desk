@@ -73,6 +73,13 @@ DEFAULT_SETTINGS = {
     "rotation_daily_cap": 1,      # at most this many live swaps per day
     "rotation_mass_limit": 5,     # more than this many domains in Retire at once = stop and tell the team (bad list, not burnt domains)
     "bench_target": 5,            # warmed, DNS-verified spare domains to keep ready
+    "bench_autobuy": False,       # the desk may order bench domains in Hypertide (also needs rotation_mode=live). OFF until a person turns it on
+    "bench_order_max_per_day": 5, # never order more than this many domains in a day (only ever tops the bench up to bench_target)
+    "bench_forwarding_domain": "victig.com",
+    "bench_client_name": "VICTIG",
+    "bench_sender_names": [],     # ["First Last", ...] the Microsoft mailboxes are created under these names (needs at least one)
+    "bench_inbox_quantity": 50,   # Hypertide: 25 or 50 (creates +2 spare mailboxes)
+    "bench_min_days": 14,         # a desk-ordered domain is not bench-ready before this many days of warm-up
     "bench_min_score": 70,        # Hypertide recoveryHealth score a bench domain needs (scale unverified; tune after seeing real ones)
     "health_weights": {},          # overrides for app/health.py DEFAULT_WEIGHTS, e.g. {"reply": 35}
     "inbox_reply_good_pct": 1.0,  # the team's goal: 1% reply rate or more is good; the health score's reply signal hits 100 here

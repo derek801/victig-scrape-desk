@@ -259,7 +259,8 @@ def region_slices(rid: int, request: Request):
 EDITABLE = {"dry_run": bool, "paused": bool, "titles": list, "bands": list, "target_results": int,
             "max_counties_per_slice": int, "window_start": str, "window_end": str, "weekdays_only": bool,
             "max_launches_per_day": int, "regap_days": int, "doordash_sync": bool,
-            "rotation_mode": str, "rotation_daily_cap": int, "rotation_mass_limit": int, "bench_target": int, "bench_min_score": float}
+            "rotation_mode": str, "bench_autobuy": bool, "bench_order_max_per_day": int, "bench_forwarding_domain": str,
+            "bench_client_name": str, "bench_sender_names": list, "bench_inbox_quantity": int, "bench_min_days": int, "rotation_daily_cap": int, "rotation_mass_limit": int, "bench_target": int, "bench_min_score": float}
 
 
 @app.post("/api/settings")

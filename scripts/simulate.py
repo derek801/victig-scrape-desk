@@ -22,7 +22,7 @@ for _k in ("GOOGLE_CHAT_WEBHOOK", "SLACK_ALERT_WEBHOOK", "BISON_KEY_VICTIG", "HY
     os.environ[_k] = ""
 os.environ["PUBLIC_URL"] = "https://desk.example.test"
 
-from app import alerts, clay, config, health, inbox, pb, rotation, runner, seed, slicer, store  # noqa: E402
+from app import alerts, clay, config, health, inbox, ordering, pb, rotation, runner, seed, slicer, store  # noqa: E402
 
 import requests  # noqa: E402
 
@@ -481,6 +481,52 @@ check(hb["errors"] >= 1 and hb["errors_recovered"] >= 1 and "bench_target" in hb
 check("Inbox rotation" in rotation.summary() and "errors" in rotation.summary(), "weekly summary sentence for the daily check")
 store.save_settings({"rotation_mode": "off"})
 check(rotation.run_cycle(bison, hyper) == {"mode": "off"}, "off means off")
+
+# 19. ordering bench domains: off by default, tops up only to the target, never double-buys
+store.kv_set("alerts_open", {})
+store.kv_set("domain_lifecycle", {})
+store.kv_set("bench_orders", [])
+store.x("DELETE FROM rotation_log")
+store.save_settings({"rotation_mode": "dry", "bench_target": 2, "bench_autobuy": False, "bench_sender_names": [], "bench_order_max_per_day": 5})
+placed = []
+ordering.create_bulk = lambda body: (placed.append(body), {"orders": [{"id": f"rec{i}", "domain": d} for i, d in enumerate(body["domains"])],
+                                                           "recordIds": [f"rec{i}" for i, _ in enumerate(body["domains"])]})[1]
+ordering.charge = lambda ids: (True, 200)
+empty = FakeHyper([])
+rotation.run_cycle(FakeBison(), empty)
+check(placed == [] and any(x["step"] == "order_needed" for x in rotation.recent_log()), "dry run / autobuy off: logs the names it would order, buys nothing")
+names = ordering.candidates(2, ordering.taken())
+check(len(names) == 2 and all(n.endswith(".com") and "-" not in n and "victig" in n and len(n) <= 35 for n in names), "names follow the fleet pattern: victig in the middle, .com, no hyphens, under 35")
+check(not set(ordering.candidates(50, {"victigscreeningteam.com"})) & {"victigscreeningteam.com"}, "names already in use are never suggested")
+store.save_settings({"rotation_mode": "live", "bench_autobuy": True})
+rotation.run_cycle(FakeBison(), empty)
+check(placed == [] and any(m for x in rotation.recent_log() for m in [x["detail"].get("missing")] if m), "autobuy on but no sender names or Bison login: refuses and says what is missing")
+store.save_settings({"bench_sender_names": ["Jane Smith", "Alex Doe"]})
+config.BISON_LOGIN_EMAIL, config.BISON_LOGIN_PASSWORD, config.BISON_WORKSPACE = "ops@example.test", "pw", "ws"
+rotation.run_cycle(FakeBison(), empty)
+check(len(placed) == 1 and len(placed[0]["domains"]) == 2 and placed[0]["plan"] == "entra" and placed[0]["selected_tool"] == "bison"
+      and placed[0]["forwarding_domain"] == "victig.com" and placed[0]["users"][0] == {"first_name": "Jane", "last_name": "Smith"},
+      "live + autobuy: one bulk Microsoft order for exactly the shortfall, Bison tool, victig.com forwarding")
+check(all(o["paid"] for o in store.kv_get("bench_orders")) and len(store.kv_get("bench_orders")) == 2, "orders are recorded and marked paid")
+rotation.run_cycle(FakeBison(), empty)
+check(len(placed) == 1, "the next cycle does not order again: ordered domains count towards the target")
+st = rotation.bench_status(empty)
+check(st["ready"] == 0 and len(st["candidates"]) == 2 and "warming" in st["candidates"][0]["reason"], "ordered domains show on the bench as warming, with days")
+store.kv_set("bench_orders", [{**o, "paid": False} for o in store.kv_get("bench_orders")])
+charged = []
+ordering.charge = lambda ids: (charged.append(ids), (False, 202))[1]
+rotation.run_cycle(FakeBison(), empty)
+check(len(placed) == 1 and len(charged) == 1, "an unpaid order is retried, never re-created")
+store.kv_set("bench_orders", [])
+store.save_settings({"bench_order_max_per_day": 1, "bench_target": 5})
+store.kv_set("bench_orders", [])
+placed.clear()
+ordering.charge = lambda ids: (True, 200)
+rotation.run_cycle(FakeBison(), empty)
+check(len(placed) == 1 and len(placed[0]["domains"]) == 1, "the daily order cap limits how many are bought")
+store.save_settings({"rotation_mode": "dry", "bench_autobuy": False, "bench_order_max_per_day": 5, "bench_target": 3, "bench_sender_names": []})
+store.kv_set("bench_orders", [])
+store.kv_set("alerts_open", {})
 
 # 17. the desk posts nowhere; /api/check hands problems to the Make daily check behind a token
 import types  # noqa: E402

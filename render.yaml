@@ -35,5 +35,11 @@ services:
         sync: false
       - key: HYPERTIDE_API_KEY
         sync: false
+      - key: BISON_LOGIN_EMAIL     # only for bench ordering: Hypertide logs into Bison with this to wire in new mailboxes
+        sync: false
+      - key: BISON_LOGIN_PASSWORD
+        sync: false
+      - key: BISON_WORKSPACE
+        sync: false
       - key: DESK_CHECK_TOKEN   # read by the Make daily check: GET /api/check with header X-Check-Token
         sync: false
