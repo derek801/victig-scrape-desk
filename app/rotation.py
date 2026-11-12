@@ -150,15 +150,17 @@ def bench_status(hyper=None):
 
 # ---- the cycle -----------------------------------------------------------------------------------
 
-def run_cycle(bison=None, hyper=None):
-    """One pass: find Retire-zone domains, swap bench domains in (up to the daily cap). Never raises."""
+def run_cycle(bison=None, hyper=None, force_dry=False):
+    """One pass: find Retire-zone domains, swap bench domains in (up to the daily cap). Never raises.
+    `force_dry` (the page's "Check now" button) plans everything on real data but changes and buys nothing,
+    whatever the mode is set to."""
     s = store.settings()
-    mode = s["rotation_mode"]
+    mode = "dry" if force_dry else s["rotation_mode"]
     if mode == "off":
         return {"mode": "off"}
     live = mode == "live"
     run = store.iso()
-    result = {"mode": mode, "swaps": [], "skipped": None}
+    result = {"mode": mode, "swaps": [], "skipped": None, "retire": [], "orders": None}
     try:
         o = inbox.overview()
         life = lifecycle()
@@ -170,6 +172,7 @@ def run_cycle(bison=None, hyper=None):
             log(run, mode, "mass_stop", None, False, {"retire": len(retire), "limit": s["rotation_mass_limit"]})
             result["skipped"] = "mass"
             return result
+        result["retire"] = [d["domain"] for d in retire]
         alerts.clear(MASS_KEY)
         allb = bench(hyper, fresh_dns=bool(retire))
         b = [x for x in allb if x["ready"]]
@@ -177,7 +180,7 @@ def run_cycle(bison=None, hyper=None):
         if not retire:
             alerts.clear(EMPTY_KEY)
             if len(b) < s["bench_target"]:
-                ordering.top_up(run, live, allb)
+                result["orders"] = ordering.top_up(run, live, allb)
             _finish_ok(run, mode)
             return result
         room = s["rotation_daily_cap"] - swaps_today()
@@ -200,7 +203,7 @@ def run_cycle(bison=None, hyper=None):
         left = len(b)
         if left < s["bench_target"]:
             log(run, mode, "refill_needed", None, True, {"ready_left": left, "target": s["bench_target"]})
-            ordering.top_up(run, live, allb)
+            result["orders"] = ordering.top_up(run, live, allb)
         _finish_ok(run, mode)
     except Exception as e:
         store.log("rotation error: " + str(e)[:200], "error")
