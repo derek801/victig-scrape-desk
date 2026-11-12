@@ -1,8 +1,12 @@
 """Scrape Desk: web app + scheduler for VICTIG's PhantomBuster Sales Nav scraping."""
 import datetime as dt
 import json
+import os
 import secrets
+import subprocess
+import sys
 import urllib.parse
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
@@ -296,10 +300,31 @@ def rotation_state(request: Request):
     return {**rotation.bench_status(), "log": rotation.recent_log(), "heartbeat": rotation.heartbeat()}
 
 
-@app.post("/api/rotation/run")
-def rotation_run(request: Request):
+@app.post("/api/rotation/dry")
+def rotation_dry(request: Request):
+    """"Check now": runs the whole rotation on real data but forced to dry run: nothing is swapped or bought."""
     need_write(request)
-    return rotation.run_cycle()
+    return {"result": rotation.run_cycle(force_dry=True), "status": rotation.bench_status(), "log": rotation.recent_log(15)}
+
+
+@app.post("/api/rotation/simulate")
+def rotation_simulate(request: Request):
+    """"Run test": runs scripts/simulate.py in a separate process against a throwaway database and fake Hypertide and Bison
+    (no network, no real keys), including the full degrade -> retire -> swap -> refill -> order cycle."""
+    need_write(request)
+    script = Path(__file__).resolve().parents[1] / "scripts" / "simulate.py"
+    if not script.exists():
+        raise HTTPException(500, "the test script is not in this deploy")
+    try:
+        p = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=120,
+                           env={"PATH": os.environ.get("PATH", ""), "PYTHONUTF8": "1"})
+    except subprocess.TimeoutExpired:
+        raise HTTPException(504, "the test took over two minutes")
+    lines = [l for l in p.stdout.splitlines() if l.startswith(("PASS ", "FAIL "))]
+    failed = [l[5:] for l in lines if l.startswith("FAIL ")]
+    ok = p.returncode == 0 and "all checks passed" in p.stdout
+    return {"ok": ok, "passed": len(lines) - len(failed), "failed": failed, "lines": lines,
+            "error": None if ok or failed else (p.stderr or p.stdout)[-300:]}
 
 
 @app.get("/api/heartbeat")
