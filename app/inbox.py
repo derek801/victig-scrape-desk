@@ -1,6 +1,9 @@
 """Inbox Health: lifetime bounce rate per sending domain, read from EmailBison (sender emails) and cross-referenced
 with Hypertide (orders). Read-only for now: it watches and alerts; nothing is paused, bought or swapped here.
 
+Each domain also gets a 0-100 health score and zone (health.py), computed from 7/14-day windows where there is
+enough history, else lifetime.
+
 Lifetime rate = bounced / sent, added up over every mailbox on a domain, judged once the domain has
 `inbox_min_sends` sends. Bison's own bands: under 2% fine, 2-3% warning, 3%+ critical. Whole domains are judged,
 not single mailboxes, because Hypertide replaces by domain and one mailbox's few sends are too noisy."""
@@ -12,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from . import alerts, config, store
+from . import alerts, config, health, store
 
 SYNC_EVERY_S = 6 * 3600
 MAX_CRIT_ALERTS = 5          # more critical domains than this at once = one summary, not one message each
@@ -50,6 +53,66 @@ def fetch_senders():
     return out
 
 
+def fetch_warmup():
+    """{sender id: warm-up score} from Bison's warm-up listing (Bison's own 0-100 placement-style score)."""
+    base, h = config.BISON_URL.rstrip("/"), {"Authorization": "Bearer " + config.BISON_KEY_VICTIG, "Accept": "application/json"}
+    out, page = {}, 1
+    while True:
+        for attempt in range(5):
+            r = requests.get(f"{base}/api/warmup/sender-emails", params={"page": page}, headers=h, timeout=40)
+            if r.status_code == 429:
+                time.sleep(20 * (attempt + 1))
+                continue
+            r.raise_for_status()
+            break
+        else:
+            raise RuntimeError("Bison warm-up listing kept answering 429")
+        j = r.json()
+        for x in j["data"]:
+            if x.get("warmup_score") is not None:
+                out[x["id"]] = x["warmup_score"]
+        if page >= j["meta"]["last_page"]:
+            return out
+        page += 1
+        time.sleep(0.1)
+
+
+def _doh(name, rtype):
+    r = requests.get("https://cloudflare-dns.com/dns-query", params={"name": name, "type": rtype},
+                     headers={"Accept": "application/dns-json"}, timeout=15)
+    r.raise_for_status()
+    return [a.get("data", "") for a in r.json().get("Answer", []) or []]
+
+
+def fetch_dns(domain):
+    """Public DNS check for one domain: SPF, DMARC, MX, and DKIM at the usual selectors (Microsoft selector1,
+    Google, default). Returns booleans, or {"error": ...} when DNS could not be read (that is not a fail)."""
+    try:
+        txt = [t.strip('"').lower() for t in _doh(domain, "TXT")]
+        dm = [t.strip('"').lower() for t in _doh("_dmarc." + domain, "TXT")]
+        dkim = bool(_doh("selector1._domainkey." + domain, "CNAME")) or any(
+            "v=dkim1" in t.lower() for sel in ("google", "default") for t in _doh(f"{sel}._domainkey.{domain}", "TXT"))
+        return {"spf": any(t.startswith("v=spf1") for t in txt), "dmarc": any(t.startswith("v=dmarc1") for t in dm),
+                "mx": bool(_doh(domain, "MX")), "dkim": dkim}
+    except Exception as e:
+        return {"error": str(e)[:80]}
+
+
+def refresh_dns(domains, max_age_h=24):
+    """Re-check each domain's DNS at most once a day; keeps the last good answer if a check errors."""
+    cur = store.kv_get("inbox_dns") or {}
+    cut = (store.now() - dt.timedelta(hours=max_age_h)).isoformat(timespec="seconds")
+    for d in domains:
+        if d in cur and not cur[d].get("error") and cur[d].get("at", "") > cut:
+            continue
+        r = fetch_dns(d)
+        if r.get("error") and d in cur and not cur[d].get("error"):
+            continue
+        cur[d] = {**r, "at": store.iso()}
+        time.sleep(0.05)
+    store.kv_set("inbox_dns", {d: v for d, v in cur.items() if d in set(domains)})
+
+
 def fetch_hypertide():
     """{domain: {status, created, tool}} from Hypertide's active orders (one call)."""
     r = requests.get("https://backend.hypertide.io/api/v1/orders/active",
@@ -67,19 +130,29 @@ def sync():
         return False
     try:
         senders = fetch_senders()
+        try:                                 # warm-up scores are a bonus signal: Bison hiccups must not block the sync
+            wu = fetch_warmup()
+        except Exception as e:
+            wu = {}
+            store.log(f"inbox: warm-up scores unavailable: {e}", "warn")
         rows = [(s["id"], s["email"].lower(), s["email"].split("@")[-1].lower(), s.get("status"),
                  1 if s.get("warmup_enabled") else 0, s.get("daily_limit") or 0, s.get("emails_sent_count") or 0,
-                 s.get("bounced_count") or 0, s.get("total_replied_count") or 0) for s in senders]
+                 s.get("bounced_count") or 0, s.get("total_replied_count") or 0,
+                 s.get("interested_leads_count") or 0, wu.get(s["id"])) for s in senders]
         if len(rows) < 10:
             raise RuntimeError(f"Bison returned only {len(rows)} sender emails; keeping the previous data")
         store.x("DELETE FROM inbox_senders")
-        store.xmany("INSERT INTO inbox_senders(id,email,domain,status,warmup,daily_limit,sent,bounced,replied) "
-                    "VALUES(?,?,?,?,?,?,?,?,?)", rows)
+        store.xmany("INSERT INTO inbox_senders(id,email,domain,status,warmup,daily_limit,sent,bounced,replied,interested,warmup_score) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?)", rows)
         if config.HYPERTIDE_API_KEY:
             try:
                 store.kv_set("hypertide_orders", fetch_hypertide())
             except Exception as e:           # Hypertide being down must not hide the Bison data
                 store.log(f"inbox: Hypertide lookup failed: {e}", "warn")
+        try:
+            refresh_dns(sorted({r[2] for r in rows}))
+        except Exception as e:
+            store.log(f"inbox: DNS checks failed: {e}", "warn")
         snapshot()
         store.kv_set("inbox_sync", {"at": store.iso(), "senders": len(rows), "error": None})
         alerts.clear("inbox:sync")
@@ -100,12 +173,39 @@ def today():
 
 
 def snapshot():
-    """One row per domain per day (the latest sync of the day wins), so the page can show a trend."""
+    """One row per domain per day (the latest sync of the day wins): lifetime counters for trends and the 7/14-day
+    windows. The day's health score and zone are filled in afterwards by `overview()` via `_store_scores`."""
     day = today()
-    store.xmany("INSERT OR REPLACE INTO inbox_history(day,domain,sent,bounced,mailboxes,connected) VALUES(?,?,?,?,?,?)",
-                [(day, d["domain"], d["sent"], d["bounced"], d["mailboxes"], d["connected"] or 0) for d in store.q(
+    store.xmany("INSERT OR REPLACE INTO inbox_history(day,domain,sent,bounced,mailboxes,connected,replied,interested) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                [(day, d["domain"], d["sent"], d["bounced"], d["mailboxes"], d["connected"] or 0, d["replied"] or 0,
+                  d["interested"] or 0) for d in store.q(
                     "SELECT domain, COUNT(*) mailboxes, SUM(status='Connected') connected, SUM(sent) sent, "
-                    "SUM(bounced) bounced FROM inbox_senders GROUP BY domain")])
+                    "SUM(bounced) bounced, SUM(replied) replied, SUM(interested) interested "
+                    "FROM inbox_senders GROUP BY domain")])
+
+
+def _store_scores(doms):
+    day = today()
+    store.xmany("UPDATE inbox_history SET score=?, zone=? WHERE day=? AND domain=?",
+                [(d["health"]["score"], d["health"]["zone"], day, d["domain"]) for d in doms if d.get("health")])
+
+
+def _window(rows, d, days, s):
+    """Sends/bounces/replies over roughly the last `days` days: today's lifetime counters minus the newest snapshot
+    that is at least `days` old (and not absurdly older). None if there is no such snapshot, it predates the replied
+    column, the counters went backwards (Bison reset), or the window has too few sends to trust."""
+    want = (dt.date.fromisoformat(today()) - dt.timedelta(days=days)).isoformat()
+    floor = (dt.date.fromisoformat(today()) - dt.timedelta(days=days + 4)).isoformat()
+    old = [r for r in rows if floor <= r["day"] <= want and r.get("replied") is not None]
+    if not old:
+        return None
+    o = old[-1]
+    w = {k: (d[k] or 0) - (o[k] or 0) for k in ("sent", "bounced", "replied", "interested")}
+    if min(w.values()) < 0 or w["sent"] < s["inbox_window_min_sends"]:
+        return None
+    w["days"] = (dt.date.fromisoformat(today()) - dt.date.fromisoformat(o["day"])).days
+    return w
 
 
 def _trends(doms, s):
@@ -146,70 +246,81 @@ def reply_band(rate, s=None):
     return "critical" if rate < s["inbox_reply_crit_pct"] else "warn" if rate < s["inbox_reply_warn_pct"] else "ok"
 
 
+def _health(doms, s):
+    """Attach the 0-100 health score to each domain (see health.py). Windows prefer the last 7 days, then 14, then
+    lifetime; the fleet baseline for reply rate is the whole fleet's lifetime rates."""
+    tot = store.q1("SELECT COALESCE(SUM(sent),0) sent, COALESCE(SUM(replied),0) replied, COALESCE(SUM(interested),0) i "
+                   "FROM inbox_senders")
+    fleet = {"reply_rate": tot["replied"] / tot["sent"] * 100 if tot["sent"] else None,
+             "positive_rate": tot["i"] / tot["sent"] * 100 if tot["sent"] else None}
+    cut = (dt.date.fromisoformat(today()) - dt.timedelta(days=40)).isoformat()
+    hist = {}
+    for r in store.q("SELECT day, domain, sent, bounced, replied, interested, score FROM inbox_history WHERE day>=? ORDER BY day", (cut,)):
+        hist.setdefault(r["domain"], []).append(r)
+    dns = store.kv_get("inbox_dns") or {}
+    for d in doms:
+        rows = hist.get(d["domain"], [])
+        w7, w14 = _window(rows, d, 7, s), _window(rows, d, 14, s)
+        w, basis = (w7, "7d") if w7 else (w14, "14d") if w14 else (None, "lifetime")
+        if w is None and d["sent"] < s["inbox_min_sends"]:
+            d["health"] = {"score": None, "zone": "new", "basis": None, "coverage": 0, "drag": None, "factors": {},
+                           "hard_fail": [], "capped": []}
+            continue
+        m = w or {k: d[k] or 0 for k in ("sent", "bounced", "replied", "interested")}
+        util = m["sent"] / (d["limit_sum"] * w["days"]) if w and d["limit_sum"] else None
+        d["health"] = health.score_domain({**m, "basis": basis, "mailboxes": d["mailboxes"], "util": util,
+                                           "warmup": d["warmup_avg"], "dns": dns.get(d["domain"])},
+                                          fleet, s.get("health_weights"))
+        d["dns"] = {k: dns[d["domain"]].get(k) for k in ("spf", "dkim", "dmarc", "mx", "error")} if d["domain"] in dns else None
+        want = (dt.date.fromisoformat(today()) - dt.timedelta(days=7)).isoformat()
+        old = [r for r in rows if r["day"] <= want and r.get("score") is not None]
+        sc = d["health"]["score"]
+        d["health"]["trend"] = round(sc - old[-1]["score"], 1) if old and sc is not None else None
+
+
 def overview():
     s = store.settings()
     ht = store.kv_get("hypertide_orders") or {}
     doms = []
     for d in store.q("SELECT domain, COUNT(*) mailboxes, SUM(status='Connected') connected, SUM(warmup) warmup, "
-                     "SUM(sent) sent, SUM(bounced) bounced, SUM(replied) replied FROM inbox_senders GROUP BY domain"):
+                     "SUM(sent) sent, SUM(bounced) bounced, SUM(replied) replied, SUM(interested) interested, "
+                     "SUM(CASE WHEN status='Connected' THEN daily_limit ELSE 0 END) limit_sum, "
+                     "AVG(warmup_score) warmup_avg FROM inbox_senders GROUP BY domain"):
         rate = round(d["bounced"] / d["sent"] * 100, 2) if d["sent"] >= s["inbox_min_sends"] else None
         o = ht.get(d["domain"], {})
         rr = round((d["replied"] or 0) / d["sent"] * 100, 2) if d["sent"] >= s["inbox_reply_min_sends"] else None
         doms.append({**d, "rate": rate, "band": band(rate, s), "reply_rate": rr, "reply_band": reply_band(rr, s),
                      "ht_status": o.get("status"), "created": o.get("created")})
-    # headline order: lowest reply rate first (domains with too few sends last), then worst bounce
-    doms.sort(key=lambda x: (x["reply_rate"] is None, x["reply_rate"] if x["reply_rate"] is not None else 0,
-                             -(x["rate"] if x["rate"] is not None else -1), x["domain"]))
     _trends(doms, s)
+    _health(doms, s)
+    # worst health first (domains with too few sends last), then lowest reply rate
+    doms.sort(key=lambda x: (x["health"]["score"] is None, x["health"]["score"] if x["health"]["score"] is not None else 0,
+                             x["reply_rate"] if x["reply_rate"] is not None else 0, x["domain"]))
     tot = store.q1("SELECT COUNT(*) n, COALESCE(SUM(sent),0) sent, COALESCE(SUM(bounced),0) bounced, "
                    "COALESCE(SUM(status!='Connected'),0) disconnected FROM inbox_senders")
     counts = {b: sum(1 for x in doms if x["band"] == b) for b in ("critical", "warn", "ok", "new")}
     reply_counts = {b: sum(1 for x in doms if x["reply_band"] == b) for b in ("critical", "warn", "ok", "new")}
     tot_replied = store.q1("SELECT COALESCE(SUM(replied),0) r FROM inbox_senders")["r"]
-    return {"domains": doms, "counts": counts, "mailboxes": tot["n"], "disconnected": tot["disconnected"],
+    zones = {z: sum(1 for x in doms if x["health"]["zone"] == z) for z in ("healthy", "watch", "danger", "retire", "new")}
+    return {"domains": doms, "counts": counts, "zones": zones, "weights": {**health.DEFAULT_WEIGHTS, **(s.get("health_weights") or {})}, "mailboxes": tot["n"], "disconnected": tot["disconnected"],
             "sent": tot["sent"], "bounced": tot["bounced"],
             "rate": round(tot["bounced"] / tot["sent"] * 100, 2) if tot["sent"] else None,
             "reply_rate": round(tot_replied / tot["sent"] * 100, 2) if tot["sent"] else None, "reply_counts": reply_counts,
             "reply_warn_pct": s["inbox_reply_warn_pct"], "reply_crit_pct": s["inbox_reply_crit_pct"],
             "reply_min_sends": s["inbox_reply_min_sends"],
             "sync": store.kv_get("inbox_sync"), "configured": bool(config.BISON_KEY_VICTIG),
-            "hypertide": bool(config.HYPERTIDE_API_KEY), "min_sends": s["inbox_min_sends"],
+            "hypertide": bool(config.HYPERTIDE_API_KEY), "min_sends": s["inbox_min_sends"], "window_min_sends": s["inbox_window_min_sends"],
             "warn_pct": s["inbox_warn_pct"], "crit_pct": s["inbox_crit_pct"],
             "alerts": [a["text"] for k, a in alerts.open_alerts().items() if k.startswith("inbox:")]}
 
 
 def check():
-    """Alert rules (never one message per item): each critical domain gets its own alert unless more than
-    MAX_CRIT_ALERTS are critical at once, which is a summary (that pattern usually means bad copy or a bad list,
-    not burnt domains). Warnings and disconnected mailboxes are weekly digests."""
+    """Keeps today's score history up to date. It raises no per-domain alerts any more: a burnt domain is the
+    rotation's job to fix, and the team is only told when the automation itself breaks (`inbox:sync`, rotation
+    errors) plus the weekly heartbeat. Old per-domain alerts left over from earlier versions are cleared."""
     o = overview()
-    crit = [d for d in o["domains"] if d["band"] == "critical"]
-    open_ = alerts.open_alerts()
-    wanted = set()
-    if len(crit) > MAX_CRIT_ALERTS:
-        wanted.add("inbox:crit:many")
-        alerts.raise_alert("inbox:crit:many", f"{len(crit)} sending domains are at a {o['crit_pct']:g}%+ lifetime bounce rate at once, "
-                           "which usually means a bad list or copy rather than burnt domains. Worst: "
-                           + ", ".join(f"{d['domain']} ({d['rate']:g}%)" for d in crit[:5]) + ".",
-                           grace_min=0, remind_h=24, link="/#inbox")
-    else:
-        for d in crit:
-            k = f"inbox:crit:{d['domain']}"
-            wanted.add(k)
-            alerts.raise_alert(k, f"{d['domain']} is critical: {d['rate']:g}% lifetime bounce rate "
-                               f"({d['bounced']:,} of {d['sent']:,} sends, {d['mailboxes']} mailboxes). It needs replacing.",
-                               grace_min=0, remind_h=24, link="/#inbox")
-    warn = [d for d in o["domains"] if d["band"] == "warn"]
-    if warn:
-        wanted.add("inbox:warn")
-        alerts.raise_alert("inbox:warn", f"{len(warn)} sending domains are in the {o['warn_pct']:g}-{o['crit_pct']:g}% warning zone. "
-                           "Highest: " + ", ".join(f"{d['domain']} ({d['rate']:g}%)" for d in warn[:3]) + ".",
-                           grace_min=0, remind_h=168, link="/#inbox")
-    if o["disconnected"]:
-        wanted.add("inbox:disconnected")
-        alerts.raise_alert("inbox:disconnected", f"{o['disconnected']:,} of {o['mailboxes']:,} mailboxes are not connected in Bison.",
-                           grace_min=0, remind_h=168, link="/#inbox")
-    for k in [k for k in open_ if k.startswith("inbox:") and k != "inbox:sync" and k not in wanted]:
+    _store_scores(o["domains"])
+    for k in [k for k in alerts.open_alerts() if k.startswith("inbox:") and k != "inbox:sync" and not k.startswith("inbox:rotation")]:
         alerts.clear(k)
 
 
