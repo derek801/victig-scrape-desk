@@ -465,7 +465,7 @@ inbox.fetch_dns = lambda d: dict(dns_ok)
 store.save_settings({"rotation_mass_limit": 0})
 store.kv_set("domain_lifecycle", {})
 r = rotation.run_cycle(bison, hyper)
-check(r["skipped"] == "mass" and any("at once" in a["text"] for a in alerts.due_alerts().values()), "more Retire domains than the limit: stop and alert")
+check(r["skipped"] == "mass" and len(r["retire"]) >= 1 and r["mass_limit"] == 0 and any("at once" in a["text"] for a in alerts.due_alerts().values()), "more Retire domains than the limit: stop and alert")
 store.save_settings({"rotation_mass_limit": 3})
 # errors raise an alert, and recovering logs it
 class Boom(FakeBison):
