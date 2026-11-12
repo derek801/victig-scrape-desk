@@ -10,7 +10,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import alerts, clay, config, inbox, runner, seed, slicer, store
+from . import alerts, clay, config, inbox, rotation, runner, seed, slicer, store
 
 app = FastAPI(title="Scrape Desk", docs_url=None, redoc_url=None)
 app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET or secrets.token_hex(32),
@@ -156,7 +156,7 @@ def api_check(request: Request):
     sage = _age_min(sync.get("at") or "")
     if config.BISON_KEY_VICTIG and config.RUN_SCHEDULER and (sage is None or sage > INBOX_SYNC_MAX_H * 60):
         problems.append("Inbox Health has not synced with EmailBison in over %d hours." % INBOX_SYNC_MAX_H)
-    return {"ok": not problems, "problems": problems, "checked_at": store.iso(),
+    return {"ok": not problems, "problems": problems, "summary": rotation.summary(), "checked_at": store.iso(),
             "heartbeat_min_ago": None if age is None else round(age), "inbox_sync_at": sync.get("at")}
 
 
@@ -258,7 +258,8 @@ def region_slices(rid: int, request: Request):
 
 EDITABLE = {"dry_run": bool, "paused": bool, "titles": list, "bands": list, "target_results": int,
             "max_counties_per_slice": int, "window_start": str, "window_end": str, "weekdays_only": bool,
-            "max_launches_per_day": int, "regap_days": int, "doordash_sync": bool}
+            "max_launches_per_day": int, "regap_days": int, "doordash_sync": bool,
+            "rotation_mode": str, "rotation_daily_cap": int, "rotation_mass_limit": int, "bench_target": int, "bench_min_score": float}
 
 
 @app.post("/api/settings")
@@ -271,6 +272,8 @@ def set_settings(request: Request, patch: dict = Body(...)):
             raise HTTPException(400, "at least one title")
     if "bands" in clean and not clean["bands"]:
         raise HTTPException(400, "at least one headcount band")
+    if "rotation_mode" in clean and clean["rotation_mode"] not in ("off", "dry", "live"):
+        raise HTTPException(400, "rotation_mode must be off, dry or live")
     store.save_settings(clean)
     store.log(f"{user(request)} changed settings: {', '.join(f'{k}={v}' for k, v in clean.items())}")
     if {"bands", "target_results", "max_counties_per_slice"} & set(clean):
@@ -284,6 +287,27 @@ def set_settings(request: Request, patch: dict = Body(...)):
 def inbox_state(request: Request):
     need_user(request)
     return inbox.overview()
+
+
+@app.get("/api/rotation")
+def rotation_state(request: Request):
+    need_user(request)
+    return {**rotation.bench_status(), "log": rotation.recent_log(), "heartbeat": rotation.heartbeat()}
+
+
+@app.post("/api/rotation/run")
+def rotation_run(request: Request):
+    need_write(request)
+    return rotation.run_cycle()
+
+
+@app.get("/api/heartbeat")
+def api_heartbeat(request: Request):
+    """Weekly heartbeat numbers for the Make scenario (token-gated like /api/check)."""
+    tok = request.headers.get("x-check-token", "")
+    if not config.DESK_CHECK_TOKEN or not secrets.compare_digest(tok, config.DESK_CHECK_TOKEN):
+        raise HTTPException(401, "bad token")
+    return rotation.heartbeat()
 
 
 @app.post("/api/inbox/sync")

@@ -5,8 +5,9 @@ One weighted score per sending domain, built only from signals we can actually r
 read yet (spam complaints, blacklists) does not count as a pass or a fail, it is left out and `coverage` shows how
 much of the total weight was measured.
 
-Reply rate carries the most weight, but it is judged RELATIVE to the fleet's own reply rate, not against a fixed
-floor: a bad list or bad copy lowers every domain at once, and that should not look like fifty burnt domains.
+Reply rate carries the most weight and is judged against the team's floor (`inbox_reply_good_pct`, 1.0%: at or
+above it scores 100, a quarter of it scores 0). It is never a hard-fail by itself: a bad list or bad copy lowers
+every domain at once, and that should not look like fifty burnt domains (the rotation's mass-retire stop covers it).
 Complaints, authentication and blacklists are the things providers themselves enforce, so they are hard-fails:
 they send a domain straight to Retire (or cap it at Danger) whatever the weighted score says.
 
@@ -69,7 +70,9 @@ def score_domain(m, fleet, weights=None):
     sub = {}
     if sent > 0:
         rr = (m.get("replied") or 0) / sent * 100
-        if fleet.get("reply_rate"):
+        if fleet.get("reply_good_pct"):             # the team's floor: 1% or more is good (0 at a quarter of it)
+            sub["reply"] = lin(rr, fleet["reply_good_pct"] * 0.25, fleet["reply_good_pct"])
+        elif fleet.get("reply_rate"):
             sub["reply"] = lin(rr / fleet["reply_rate"], 0.25, 1.0)
         if fleet.get("positive_rate"):
             sub["positive"] = lin((m.get("interested") or 0) / sent * 100 / fleet["positive_rate"], 0.25, 1.0)

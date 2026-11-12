@@ -22,7 +22,7 @@ for _k in ("GOOGLE_CHAT_WEBHOOK", "SLACK_ALERT_WEBHOOK", "BISON_KEY_VICTIG", "HY
     os.environ[_k] = ""
 os.environ["PUBLIC_URL"] = "https://desk.example.test"
 
-from app import alerts, clay, config, health, inbox, pb, runner, seed, slicer, store  # noqa: E402
+from app import alerts, clay, config, health, inbox, pb, rotation, runner, seed, slicer, store  # noqa: E402
 
 import requests  # noqa: E402
 
@@ -349,6 +349,9 @@ r0 = health.score_domain(base, FL)
 check(r0["zone"] == "healthy" and r0["score"] >= 90, "a clean domain at fleet reply rate scores Healthy")
 r1 = health.score_domain({**base, "replied": 2, "interested": 0}, FL)
 check(r1["score"] < r0["score"] and r1["drag"]["key"] == "reply", "low reply rate is the biggest drag and lowers the score")
+rf = health.score_domain({**base, "replied": 10}, {**FL, "reply_good_pct": 1.0})
+rf2 = health.score_domain({**base, "replied": 5}, {**FL, "reply_good_pct": 1.0})
+check(rf["factors"]["reply"]["score"] == 100 and rf2["factors"]["reply"]["score"] < 60, "reply rate: 1% or more scores 100, half of that scores well below")
 check(health.score_domain({**base, "complaint_pct": 0.35}, FL)["zone"] == "retire", "spam complaints at 0.3% hard-fail to Retire")
 cap = health.score_domain({**base, "bounced": 25}, FL)
 check(cap["zone"] == "danger" and cap["capped"], "2.5% bounce over a 7-day window caps the domain at Danger")
@@ -359,6 +362,125 @@ check(health.score_domain({**base, "dns": {"error": "timeout"}}, FL)["zone"] == 
 check(health.score_domain({**base, "basis": "lifetime", "bounced": 60}, FL)["zone"] != "retire", "lifetime numbers never hard-fail on bounce alone")
 check(health.score_domain({**base, "blacklisted": True}, FL)["zone"] == "retire", "a major blacklist listing hard-fails")
 check(health.score_domain({"sent": 0}, FL)["zone"] == "new", "no data = new")
+
+# 18. rotation: a domain degrades -> Retire -> bench domain swapped in (dry, then live) -> refill flagged -> audit log
+class FakeBison:
+    def __init__(self):
+        self.camps = {}      # sender id -> [campaign ids]
+        self.calls = []
+
+    def campaigns_of(self, sid):
+        return list(self.camps.get(sid, []))
+
+    def attach(self, cid, ids):
+        self.calls.append(("attach", cid, list(ids)))
+
+    def remove(self, cid, ids):
+        self.calls.append(("remove", cid, list(ids)))
+
+
+class FakeHyper:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def pool(self):
+        return self.rows
+
+
+store.x("DELETE FROM inbox_history")
+store.kv_set("alerts_open", {})
+store.kv_set("domain_lifecycle", {})
+store.x("DELETE FROM rotation_log")
+inbox.fetch_hypertide = lambda: {}
+# fleet: 3 healthy domains, then one that degrades (bounces + zero replies), and a bench domain already in Bison
+fleet = [mk(i, "a.com", 400, 4, replied=8) for i in range(10)] + [mk(100 + i, "b.com", 400, 4, replied=8) for i in range(10)] \
+    + [mk(200 + i, "c.com", 400, 4, replied=8) for i in range(10)] + [mk(300 + i, "burnt.com", 400, 4, replied=8) for i in range(10)] \
+    + [mk(500 + i, "bench1.com", 0, 0) for i in range(4)] + [mk(600 + i, "bench2.com", 0, 0) for i in range(4)]
+inbox.fetch_senders = lambda: fleet
+inbox.fetch_warmup = lambda: {x["id"]: 96 if x["email"].split("@")[1].startswith("bench1") else 60 if x["email"].split("@")[1].startswith("bench2") else 90 for x in fleet}
+dns_ok = {"spf": True, "dmarc": True, "mx": True, "dkim": True}
+inbox.fetch_dns = lambda d: dict(dns_ok)
+store.save_settings({"rotation_mode": "dry", "rotation_daily_cap": 1, "bench_target": 3, "bench_min_score": 70, "rotation_mass_limit": 3})
+bison = FakeBison()
+for i in range(300, 310):
+    bison.camps[i] = [7001, 7002]
+hyper = FakeHyper([{"domain": "bench1.com", "status": "ready", "score": 88, "eligible_at": None},
+                   {"domain": "bench2.com", "status": "ready", "score": 90, "eligible_at": None},       # ready but mailboxes not warm
+                   {"domain": "bench3.com", "status": "warming_up", "score": None, "eligible_at": "2026-12-01"}])
+old_day = (dt.date.fromisoformat(inbox.today()) - dt.timedelta(days=7)).isoformat()
+inbox.sync()
+def hist(rows):
+    store.x("DELETE FROM inbox_history WHERE day=?", (old_day,))
+    store.xmany("INSERT INTO inbox_history(day,domain,sent,bounced,mailboxes,connected,replied,interested,score) VALUES(?,?,?,?,?,?,?,?,?)", rows)
+hist([(old_day, "burnt.com", 2000, 20, 10, 10, 40, 0, 80.0)] + [(old_day, d, 2000, 20, 10, 10, 40, 0, 80.0) for d in ("a.com", "b.com", "c.com")])
+b = rotation.bench_status(hyper)
+by_dom = {c["domain"]: c for c in b["candidates"]}
+check(b["ready"] == 1 and by_dom["bench1.com"]["ready"] and "warm-up" in by_dom["bench2.com"]["reason"]
+      and "warming" in by_dom["bench3.com"]["reason"] and b["short_by"] == 2, "bench: only a warm, DNS-verified ready domain counts; others say why not")
+r = rotation.run_cycle(bison, hyper)
+check(r["swaps"] == [] and r["skipped"] is None, "healthy fleet: rotation does nothing")
+# burnt.com now sends 1,000 more with 12% bouncing and no replies in the last 7 days
+fleet[:] = [x for x in fleet if not x["email"].endswith("burnt.com")] + [mk(300 + i, "burnt.com", 500, 60, replied=0) for i in range(10)]
+for x in fleet:
+    if x["email"].endswith("burnt.com"):
+        x["emails_sent_count"] = 500 + 400
+        x["bounced_count"] = 60 + 4
+        x["total_replied_count"] = 8
+inbox.sync()
+o = inbox.overview()
+bz = {d["domain"]: d["health"] for d in o["domains"]}
+check(bz["burnt.com"]["zone"] == "retire" and bz["a.com"]["zone"] != "retire", "burnt.com degrades into the Retire zone; the others stay out")
+r = rotation.run_cycle(bison, hyper)
+check(len(r["swaps"]) == 1 and r["swaps"][0]["out"] == "burnt.com" and r["swaps"][0]["in"] == "bench1.com" and r["swaps"][0]["mode"] == "dry"
+      and bison.calls == [] and rotation.lifecycle() == {}, "dry run: plans burnt.com -> bench1.com, makes no Bison call and changes no state")
+steps = [x["step"] for x in rotation.recent_log()]
+check("plan" in steps and "swap" in steps and "refill_needed" in steps, "dry run is logged, including that the bench needs refilling")
+store.save_settings({"rotation_mode": "live"})
+r = rotation.run_cycle(bison, hyper)
+att = [c for c in bison.calls if c[0] == "attach"]
+rem = [c for c in bison.calls if c[0] == "remove"]
+check(len(att) == 2 and len(rem) == 2 and bison.calls.index(att[-1]) < bison.calls.index(rem[0]), "live: attach on every campaign first, then remove")
+check(set(att[0][2]) <= {500, 501, 502, 503} and len(rem[0][2]) == 10, "live: replacement mailboxes attached, old mailboxes removed")
+check(rotation.lifecycle()["burnt.com"]["state"] == "resting" and rotation.lifecycle()["bench1.com"]["state"] == "active", "retired domain marked resting, bench domain active")
+n_calls = len(bison.calls)
+r = rotation.run_cycle(bison, hyper)
+check(len(bison.calls) == n_calls and r["swaps"] == [], "the same domain is not swapped twice")
+check(rotation.swaps_today() == 1, "daily swap count")
+# the cap: a second retire-zone domain waits until tomorrow
+life = rotation.lifecycle()
+life.pop("burnt.com")
+store.kv_set("domain_lifecycle", life)
+r = rotation.run_cycle(bison, hyper)
+check(r["skipped"] == "cap" and len(bison.calls) == n_calls, "daily cap stops a second swap")
+# no ready bench -> alert, nothing swapped
+store.x("DELETE FROM rotation_log")
+r = rotation.run_cycle(bison, FakeHyper([]))
+check(r["skipped"] == "bench-empty" and "bench has no ready domain" in " ".join(a["text"] for a in alerts.due_alerts().values()),
+      "empty bench is an alert, not a silent skip")
+# DNS broken at swap time -> candidate rejected
+inbox.fetch_dns = lambda d: {"spf": False, "dmarc": True, "mx": True, "dkim": True}
+check(rotation.bench(hyper, fresh_dns=True)[0]["ready"] is False, "replacement with broken DNS is not used")
+inbox.fetch_dns = lambda d: dict(dns_ok)
+# mass event -> stop and tell the team
+store.save_settings({"rotation_mass_limit": 0})
+store.kv_set("domain_lifecycle", {})
+r = rotation.run_cycle(bison, hyper)
+check(r["skipped"] == "mass" and any("at once" in a["text"] for a in alerts.due_alerts().values()), "more Retire domains than the limit: stop and alert")
+store.save_settings({"rotation_mass_limit": 3})
+# errors raise an alert, and recovering logs it
+class Boom(FakeBison):
+    def campaigns_of(self, sid):
+        raise RuntimeError("bison down")
+r = rotation.run_cycle(Boom(), hyper)
+check(r["skipped"] == "error" and any("Domain rotation hit an error" in a["text"] for a in alerts.due_alerts().values()), "a failing step alerts and stops")
+store.kv_set("domain_lifecycle", {})
+store.save_settings({"rotation_mode": "dry"})
+rotation.run_cycle(FakeBison(), hyper)
+hb = rotation.heartbeat()
+check(hb["errors"] >= 1 and hb["errors_recovered"] >= 1 and "bench_target" in hb, "heartbeat counts errors and recoveries")
+check("Inbox rotation" in rotation.summary() and "errors" in rotation.summary(), "weekly summary sentence for the daily check")
+store.save_settings({"rotation_mode": "off"})
+check(rotation.run_cycle(bison, hyper) == {"mode": "off"}, "off means off")
 
 # 17. the desk posts nowhere; /api/check hands problems to the Make daily check behind a token
 import types  # noqa: E402
