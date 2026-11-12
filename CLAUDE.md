@@ -15,7 +15,8 @@ user-facing picture; this file is the working knowledge behind it.
 - `app/pb.py`: PhantomBuster API v2 client + run-log parser
 - `app/geo.py`: fills missing LinkedIn county location ids, slowly
 - `app/alerts.py`: alert state (grace period, "resolved"); posts nowhere. `GET /api/check` (token) exposes them to the Make daily check
-- `app/inbox.py`: Inbox Health tab. Lifetime bounce rate per sending domain from Bison sender emails (+ Hypertide order status), bands 2%/3%, read-only for now; synced every 6h in its own thread; grouped alerts
+- `app/inbox.py`: Inbox Health tab. Lifetime bounce rate per sending domain from Bison sender emails (+ Hypertide order status), per-domain health score from 7/14-day windows (daily snapshots), warm-up scores, DNS checks; read-only; synced every 6h in its own thread; raises no per-domain alerts, only `inbox:sync` failures
+- `app/health.py`: pure 0-100 domain health score + zones (Healthy/Watch/Danger/Retire), weights, hard-fails. Complaints/blacklist are not readable yet and are left out, not counted as passes
 - `app/clay.py`: row estimate per Clay table (one per rep, filled by Clay's PhantomBuster pull): set count + profiles scraped since; alerts at 80/90/95% of 50k. Clay has no API to read counts or duplicate tables, so duplicating is a guided manual step
 - `app/seed.py`: first-boot data (regions, accounts, counties, calibration, past runs)
 - `app/jobs/doordash*.py`: optional Bison campaign-10 hygiene job (off by default)

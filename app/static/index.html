@@ -68,7 +68,7 @@ textarea{width:100%;min-height:150px}
 .pagetabs button{background:transparent;border-color:transparent;color:#cbd5e1;padding:6px 12px}
 .pagetabs button.on{background:#1e293b;border-color:#334155;color:#fff}
 .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600}
-.pill.critical{background:#fde8e8;color:#7f1d1d}.pill.warn{background:#fff3cd;color:#78350f}.pill.ok{background:#d1fae5;color:#064e3b}.pill.new{background:#eef1f6;color:var(--mute)}
+.pill.critical{background:#fde8e8;color:#7f1d1d}.pill.warn{background:#fff3cd;color:#78350f}.pill.ok{background:#d1fae5;color:#064e3b}.pill.new{background:#eef1f6;color:var(--mute)}.pill.healthy{background:#d1fae5;color:#064e3b}.pill.watch{background:#fff3cd;color:#78350f}.pill.danger{background:#fed7aa;color:#7c2d12}.pill.retire{background:#7f1d1d;color:#fff}
 .filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
 .filters button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 body.inboxtab .deskonly{display:none}
@@ -272,22 +272,28 @@ function renderInbox(){
   $("inboxBanners").innerHTML=b.join("");
   const c=d.counts;
   const rc=d.reply_counts||{};
-  $("inboxKpis").innerHTML=[[fmt(d.domains.length),"Sending domains"],[d.reply_rate==null?"–":d.reply_rate+"%","Reply rate overall (lifetime)"],[fmt((rc.critical||0)+(rc.warn||0)),`Low reply (under ${d.reply_warn_pct}%)`],[fmt(c.critical),`Bounce critical (${d.crit_pct}%+)`],[fmt(d.disconnected),`Mailboxes not connected of ${fmt(d.mailboxes)}`]]
-    .map(([v,l],i)=>`<div class="kpi"><div class="v" style="${i===2&&(rc.critical)?"color:var(--red)":i===2&&rc.warn?"color:var(--amber)":i===3&&c.critical?"color:var(--red)":""}">${v}</div><div class="l">${l}</div></div>`).join("");
+  const z=d.zones||{};
+  $("inboxKpis").innerHTML=[[fmt(d.domains.length),"Sending domains"],[fmt(z.healthy||0),"Healthy (75+)"],[fmt(z.watch||0),"Watch (55-74)"],[fmt(z.danger||0),"Danger (35-54)"],[fmt(z.retire||0),"Retire (under 35 or hard-fail)"],[d.reply_rate==null?"–":d.reply_rate+"%","Reply rate overall (lifetime)"],[fmt(d.disconnected),`Mailboxes not connected of ${fmt(d.mailboxes)}`]]
+    .map(([v,l],i)=>`<div class="kpi"><div class="v" style="${i===4&&z.retire?"color:var(--red)":i===3&&z.danger?"color:var(--amber)":""}">${v}</div><div class="l">${l}</div></div>`).join("");
   $("inboxNote").textContent=d.sync&&d.sync.at?`synced ${ago(d.sync.at)} · ${d.rate==null?"":d.rate+"% lifetime bounce overall"}`:"not synced yet";
-  const f=[["all","All"],["lowreply","Low reply"],["critical","Bounce critical"],["warn","Bounce warning"],["ok","Bounce healthy"],["disc","Has disconnected"]];
+  const f=[["all","All"],["retire","Retire"],["danger","Danger"],["watch","Watch"],["healthy","Healthy"],["lowreply","Low reply"],["disc","Has disconnected"]];
   $("inboxFilters").innerHTML=f.map(([k,l])=>`<button class="${inboxFilter===k?"on":""}" onclick="inboxFilter='${k}';renderInbox()">${l}</button>`).join("")+`<button style="margin-left:auto" onclick="inboxSync()">Sync now</button>`;
-  const rows=d.domains.filter(x=>inboxFilter==="all"||(inboxFilter==="disc"?x.connected<x.mailboxes:inboxFilter==="lowreply"?(x.reply_band==="critical"||x.reply_band==="warn"):x.band===inboxFilter)).map(x=>{
+  const rows=d.domains.filter(x=>inboxFilter==="all"||(inboxFilter==="disc"?x.connected<x.mailboxes:inboxFilter==="lowreply"?(x.reply_band==="critical"||x.reply_band==="warn"):x.health.zone===inboxFilter)).map(x=>{
     const label={critical:"Critical",warn:"Warning",ok:"OK",new:"Too few sends"}[x.band];
     const rl={critical:"Critical",warn:"Warning",ok:"OK",new:"Too few sends"}[x.reply_band];
-    return `<tr><td><b>${esc(x.domain)}</b></td><td>${x.reply_band==="new"?`<span class="pill new">${rl}</span>`:`<span class="pill ${x.reply_band}" title="Lower is worse">${x.reply_rate}%</span>`}</td>
+    const h=x.health,zn={healthy:"Healthy",watch:"Watch",danger:"Danger",retire:"Retire",new:"Too few sends"}[h.zone];
+    const why=[...(h.hard_fail||[]),...(h.capped||[])].join("; ")||(h.drag?`${h.drag.label} (-${h.drag.points})`:"–");
+    const tip=Object.entries(h.factors||{}).map(([k,v])=>`${k}: ${v.score}/100 (weight ${v.weight})`).join("\n")+`\nmeasured: ${h.coverage}% of weight, basis: ${h.basis||"–"}`;
+    const ht=h.trend==null?"–":(h.trend>0?"+":"")+h.trend;
+    return `<tr><td><b>${esc(x.domain)}</b></td><td title="${esc(tip)}"><b>${h.score==null?"–":h.score}</b></td><td><span class="pill ${h.zone}">${zn}</span></td><td class="small">${esc(why)}</td><td>${ht}</td><td>${x.reply_band==="new"?`<span class="pill new">${rl}</span>`:`<span class="pill ${x.reply_band}" title="Lower is worse">${x.reply_rate}%</span>`}</td>
       <td>${fmt(x.replied||0)} <span class="muted small">of ${fmt(x.sent)}</span></td>
       <td>${x.band==="new"?`<span class="pill new">${label}</span>`:`<span class="pill ${x.band}">${x.rate}%</span>`}</td>
       <td>${fmt(x.bounced)} <span class="muted small">of ${fmt(x.sent)}</span></td>
       <td>${x.connected} <span class="muted small">/ ${x.mailboxes}</span>${x.connected<x.mailboxes?` <span class="att small">${x.mailboxes-x.connected} off</span>`:""}</td>
       <td>${trendCell(x)}</td><td>${x.warmup} <span class="muted small">warmup on</span></td><td>${esc(x.ht_status||"–")}</td><td class="muted small">${esc(x.created||"")}</td></tr>`}).join("");
-  $("inboxTable").innerHTML=`<tr><th>Domain</th><th>Reply rate</th><th>Replies / sent</th><th>Lifetime bounce</th><th>Bounced / sent</th><th>Mailboxes connected</th><th>Trend (pts)</th><th>Warmup</th><th>Hypertide status</th><th>Ordered</th></tr>${rows||`<tr><td colspan="10" class="muted">Nothing matches.</td></tr>`}`;
-  $("inboxFoot").textContent=`Reply rate = replies ÷ sends for the whole domain (the headline signal: lower is worse; judged once it has ${d.reply_min_sends}+ sends; under ${d.reply_warn_pct}% warning, under ${d.reply_crit_pct}% critical). Sorted lowest reply rate first. Lifetime bounce = bounced ÷ sent, judged once it has ${d.min_sends}+ sends. Trend = change in the lifetime rate over about 7 days, from a daily snapshot (it builds up from the first sync). Read-only: this tab watches and alerts; it doesn't pause, buy or swap anything yet.`+(d.hypertide?"":" (Hypertide key not set: status column empty.)");
+  $("inboxTable").innerHTML=`<tr><th>Domain</th><th>Score</th><th>Zone</th><th>Top drag / reason</th><th>Score trend (7d)</th><th>Reply rate</th><th>Replies / sent</th><th>Lifetime bounce</th><th>Bounced / sent</th><th>Mailboxes connected</th><th>Trend (pts)</th><th>Warmup</th><th>Hypertide status</th><th>Ordered</th></tr>${rows||`<tr><td colspan="14" class="muted">Nothing matches.</td></tr>`}`;
+  const w=d.weights||{};
+  $("inboxFoot").textContent=`Health score 0-100 = weighted average of what we can measure (${Object.entries(w).map(([k,v])=>k+" "+v).join(", ")}); signals we cannot read yet (spam complaints, blacklists) are left out, not counted as passes. Reply and positive-reply rates are judged against the fleet's own rate. Hard-fails (complaints 0.3%+, no SPF and DMARC, blacklist, 5%+ bounce in the window) go straight to Retire; 2%+ bounce caps at Danger. Windows: last 7 days, then 14, then lifetime, and each needs ${d.window_min_sends||200}+ sends. Hover a score for the breakdown. Reply rate = replies ÷ sends for the whole domain (the headline signal: lower is worse; judged once it has ${d.reply_min_sends}+ sends; under ${d.reply_warn_pct}% warning, under ${d.reply_crit_pct}% critical). Sorted worst score first. Lifetime bounce = bounced ÷ sent, judged once it has ${d.min_sends}+ sends. Trend = change in the lifetime rate over about 7 days, from a daily snapshot (it builds up from the first sync). Read-only: nothing is paused, bought or swapped from this tab yet.`+(d.hypertide?"":" (Hypertide key not set: status column empty.)");
 }
 function renderChart(){
   const keys=S.accounts.map(a=>a.key), days=[];

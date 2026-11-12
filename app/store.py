@@ -38,10 +38,11 @@ CREATE TABLE IF NOT EXISTS clay_tables (
   row_limit INTEGER DEFAULT 50000, active INTEGER DEFAULT 1, created_at TEXT, archived_at TEXT);
 CREATE TABLE IF NOT EXISTS inbox_senders (
   id INTEGER PRIMARY KEY, email TEXT, domain TEXT, status TEXT, warmup INTEGER, daily_limit INTEGER,
-  sent INTEGER, bounced INTEGER, replied INTEGER);
+  sent INTEGER, bounced INTEGER, replied INTEGER, interested INTEGER, warmup_score REAL);
 CREATE INDEX IF NOT EXISTS inbox_dom ON inbox_senders(domain);
 CREATE TABLE IF NOT EXISTS inbox_history (
   day TEXT, domain TEXT, sent INTEGER, bounced INTEGER, mailboxes INTEGER, connected INTEGER,
+  replied INTEGER, interested INTEGER, score REAL, zone TEXT,
   PRIMARY KEY (day, domain));
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, ts TEXT, level TEXT, text TEXT);
 """
@@ -65,6 +66,8 @@ DEFAULT_SETTINGS = {
     "inbox_crit_pct": 3.0,        # ... 3%+ is critical (replace)
     "inbox_reply_min_sends": 500, # reply rate is judged once a domain has this many sends (replies are rare)
     "inbox_reply_warn_pct": 1.0,  # reply rate: lower is worse. Under 1.0% is the warning zone ...
+    "inbox_window_min_sends": 200, # a 7/14-day health window needs this many sends, else the lifetime numbers are used
+    "health_weights": {},          # overrides for app/health.py DEFAULT_WEIGHTS, e.g. {"reply": 35}
     "inbox_reply_crit_pct": 0.6,  # ... under 0.6% is critical. (Fleet median is about 1.3%, overall about 1.05%.)
     "doordash_sync": False,       # campaign-10 hygiene job (moved off Derek's PC when switched on)
     "doordash_sync_every_min": 120,
@@ -96,6 +99,13 @@ def init():
             conn().execute("ALTER TABLE slices ADD COLUMN titles TEXT")
         except sqlite3.OperationalError:
             pass
+        for tbl, col, typ in (("inbox_senders", "interested", "INTEGER"), ("inbox_senders", "warmup_score", "REAL"),
+                              ("inbox_history", "replied", "INTEGER"), ("inbox_history", "interested", "INTEGER"),
+                              ("inbox_history", "score", "REAL"), ("inbox_history", "zone", "TEXT")):
+            try:                                  # databases made before the health score existed
+                conn().execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {typ}")
+            except sqlite3.OperationalError:
+                pass
         conn().commit()
 
 

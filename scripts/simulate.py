@@ -22,7 +22,7 @@ for _k in ("GOOGLE_CHAT_WEBHOOK", "SLACK_ALERT_WEBHOOK", "BISON_KEY_VICTIG", "HY
     os.environ[_k] = ""
 os.environ["PUBLIC_URL"] = "https://desk.example.test"
 
-from app import alerts, clay, config, inbox, pb, runner, seed, slicer, store  # noqa: E402
+from app import alerts, clay, config, health, inbox, pb, runner, seed, slicer, store  # noqa: E402
 
 import requests  # noqa: E402
 
@@ -301,6 +301,8 @@ config.BISON_KEY_VICTIG = "x"
 inbox.fetch_senders = lambda: fake
 inbox.fetch_hypertide = lambda: {"bad.com": {"status": "NPC", "created": "2025-06-01", "tool": "Email Bison"}}
 config.HYPERTIDE_API_KEY = "y"
+inbox.fetch_warmup = lambda: {x["id"]: (92 if x["email"].endswith("good.com") else 70 if x["email"].endswith("warn.com") else 55) for x in fake}
+inbox.fetch_dns = lambda d: {"spf": True, "dmarc": True, "mx": True, "dkim": True}
 check(inbox.sync(), "inbox sync runs")
 o = inbox.overview()
 by = {d["domain"]: d for d in o["domains"]}
@@ -311,29 +313,52 @@ check(by["good.com"]["reply_band"] == "ok" and by["warn.com"]["reply_band"] == "
 check(by["good.com"]["reply_rate"] == 1.82 and by["warn.com"]["reply_rate"] == 0.8 and by["bad.com"]["reply_rate"] == 0.0,
       "reply rate = replies / sends for the whole domain")
 check([d["domain"] for d in o["domains"]] == ["bad.com", "warn.com", "good.com", "tiny.com"],
-      "domains sort by lowest reply rate first, too-few-sends last")
+      "domains sort by worst health score first, too-few-sends last")
+hs = {d["domain"]: d["health"] for d in o["domains"]}
+check(hs["good.com"]["zone"] == "healthy" and hs["bad.com"]["score"] < hs["warn.com"]["score"] < hs["good.com"]["score"]
+      and hs["tiny.com"]["zone"] == "new" and hs["bad.com"]["drag"]["key"] == "reply" and hs["good.com"]["basis"] == "lifetime",
+      "health score orders good > warn > bad; bad's biggest drag is reply rate; too few sends = new")
+check(hs["good.com"]["coverage"] == 58 and o["zones"]["new"] == 1, "complaints and blacklists are unreadable, volume needs a window, sample has no interested replies: coverage 58%; zone counts")
 check(o["reply_rate"] is not None and o["reply_counts"] == {"critical": 1, "warn": 1, "ok": 1, "new": 1}, "overall reply rate and band counts")
 check(by["bad.com"]["ht_status"] == "NPC" and o["disconnected"] == 1, "Hypertide status joined; disconnected counted")
-texts = [a["text"] for a in alerts.due_alerts().values()]
-check(sum("bad.com is critical" in t for t in texts) == 1 and sum("warning zone" in t for t in texts) == 1
-      and sum("not connected" in t for t in texts) == 1, "one alert for the critical domain, one warning digest, one disconnected digest")
-n = len(texts)
-inbox.sync()
-check(len(alerts.due_alerts()) == n, "a second sync with the same data adds nothing new")
+check(alerts.due_alerts() == {}, "domain trouble raises no alerts: only the automation breaking does")
 
 # 16. daily snapshots give a trend: older day with a lower rate -> positive points, recent-sends rate
 old_day = (dt.date.fromisoformat(inbox.today()) - dt.timedelta(days=7)).isoformat()
 store.x("DELETE FROM inbox_history")
-store.xmany("INSERT INTO inbox_history(day,domain,sent,bounced,mailboxes,connected) VALUES(?,?,?,?,?,?)",
-            [(old_day, "bad.com", 1000, 20, 10, 10), (old_day, "good.com", 2200, 22, 11, 10)])
+store.xmany("INSERT INTO inbox_history(day,domain,sent,bounced,mailboxes,connected,replied,interested,score) VALUES(?,?,?,?,?,?,?,?,?)",
+            [(old_day, "bad.com", 1000, 20, 10, 10, 0, 0, 60.0), (old_day, "good.com", 2200, 22, 11, 10, 44, 0, 90.0)])
 inbox.sync()
 by = {d["domain"]: d for d in inbox.overview()["domains"]}
+check(by["bad.com"]["health"]["basis"] == "7d" and by["bad.com"]["health"]["zone"] == "retire"
+      and any("bounce rate" in r for r in by["bad.com"]["health"]["hard_fail"]), "7-day window: 6% bounce over 1,000 sends is a hard-fail to Retire")
+check(by["good.com"]["health"]["basis"] == "lifetime" and by["bad.com"]["health"]["trend"] is not None
+      and by["bad.com"]["health"]["trend"] < 0, "too few sends in the window falls back to lifetime; score trend vs a week ago")
 check(by["bad.com"]["trend"] and by["bad.com"]["trend"]["pp"] > 1.5 and by["bad.com"]["trend"]["days"] == 7
       and by["bad.com"]["recent_rate"] is not None, "trend: a worsening domain shows positive points and its recent-sends rate")
 check(by["good.com"]["trend"] and abs(by["good.com"]["trend"]["pp"]) < 0.5, "trend: a steady domain stays flat")
 check(len(store.q("SELECT 1 FROM inbox_history WHERE day=?", (inbox.today(),))) == 4, "one snapshot row per domain per day")
 inbox.sync()
 check(len(store.q("SELECT 1 FROM inbox_history WHERE day=?", (inbox.today(),))) == 4, "a second sync the same day replaces, not duplicates")
+
+# 16b. scoring rules on plain numbers
+FL = {"reply_rate": 1.0, "positive_rate": 0.2}
+base = {"sent": 1000, "bounced": 5, "replied": 12, "interested": 3, "basis": "7d", "mailboxes": 10, "warmup": 95,
+        "dns": {"spf": True, "dmarc": True, "mx": True, "dkim": True}, "util": 0.5}
+r0 = health.score_domain(base, FL)
+check(r0["zone"] == "healthy" and r0["score"] >= 90, "a clean domain at fleet reply rate scores Healthy")
+r1 = health.score_domain({**base, "replied": 2, "interested": 0}, FL)
+check(r1["score"] < r0["score"] and r1["drag"]["key"] == "reply", "low reply rate is the biggest drag and lowers the score")
+check(health.score_domain({**base, "complaint_pct": 0.35}, FL)["zone"] == "retire", "spam complaints at 0.3% hard-fail to Retire")
+cap = health.score_domain({**base, "bounced": 25}, FL)
+check(cap["zone"] == "danger" and cap["capped"], "2.5% bounce over a 7-day window caps the domain at Danger")
+check(health.score_domain({**base, "bounced": 60}, FL)["zone"] == "retire", "6% bounce over a 7-day window hard-fails to Retire")
+check(health.score_domain({**base, "dns": {"spf": False, "dmarc": False, "mx": True, "dkim": False}}, FL)["zone"] == "retire",
+      "no SPF and no DMARC hard-fails")
+check(health.score_domain({**base, "dns": {"error": "timeout"}}, FL)["zone"] == "healthy", "unreadable DNS is left out, not counted as a fail")
+check(health.score_domain({**base, "basis": "lifetime", "bounced": 60}, FL)["zone"] != "retire", "lifetime numbers never hard-fail on bounce alone")
+check(health.score_domain({**base, "blacklisted": True}, FL)["zone"] == "retire", "a major blacklist listing hard-fails")
+check(health.score_domain({"sent": 0}, FL)["zone"] == "new", "no data = new")
 
 # 17. the desk posts nowhere; /api/check hands problems to the Make daily check behind a token
 import types  # noqa: E402
@@ -356,7 +381,7 @@ except HTTPException as e:
     denied = e.status_code == 401
 check(denied, "/api/check refuses a wrong token")
 r = desk.api_check(req("t0ken"))
-check(not r["ok"] and any("bad.com is critical" in t for t in r["problems"]), "/api/check lists the critical domain for Make")
+check(r["ok"] and r["problems"] == [], "/api/check does not report individual burnt domains")
 store.kv_set("alerts_open", {})
 store.kv_set("heartbeat", store.iso())
 store.kv_set("inbox_sync", {"at": store.iso()})
