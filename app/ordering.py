@@ -118,6 +118,15 @@ def top_up(run, live, candidates_now, create=None, pay=None):
         _log(run, live, "order_needed", True, {"would_order": names, "autobuy": s["bench_autobuy"], "missing": gaps,
                                                "note": "a person orders these, or turn on bench_autobuy"})
         return {"ordered": [], "would_order": names, "missing": gaps}
+    return place(run, live, names, n, create, pay)
+
+
+def place(run, live, names, n, create=None, pay=None):
+    """Create the order for `names` (swapping in the next unused names if one is refused), write it down, then pay.
+    Used by the automatic top-up and by the page's "Order domains" button (a person's click)."""
+    s = store.settings()
+    create, pay = create or create_bulk, pay or charge
+    orders = store.kv_get("bench_orders") or []
     tried = store.kv_get("bench_names_tried") or []
     for _ in range(3):                                   # a name can turn out to be taken: drop it, try the next
         try:
@@ -141,3 +150,48 @@ def top_up(run, live, candidates_now, create=None, pay=None):
         store.kv_set("bench_orders", orders)
     _log(run, live, "order_charge", ok, {"domains": [o["domain"] for o in data["orders"]], "http": code})
     return {"ordered": [o["domain"] for o in data["orders"]], "paid": ok}
+
+
+def preview(count):
+    """What the Order button would do right now (nothing is bought)."""
+    s = store.settings()
+    orders = store.kv_get("bench_orders") or []
+    today = store.iso()[:10]
+    room = max(0, s["bench_order_max_per_day"] - sum(1 for o in orders if o["at"][:10] == today))
+    unpaid = [o["domain"] for o in orders if not o.get("paid")]
+    count = max(1, min(int(count), room or 1))
+    return {"names": candidates(count, taken()), "room_today": room, "unpaid": unpaid, "missing": missing_setup(s),
+            "plan": "Microsoft, " + str(s["bench_inbox_quantity"] + 2) + " mailboxes each", "forwarding": s["bench_forwarding_domain"],
+            "senders": [f"{u['first_name']} {u['last_name']}" for u in _users(s)]}
+
+
+def order_now(names):
+    """A person pressed Order and confirmed the list. Same safety as the automatic path (daily cap, setup check,
+    unpaid orders are retried first), but it does not need rotation_mode=live or bench_autobuy: the click is the approval."""
+    s = store.settings()
+    gaps = missing_setup(s)
+    if gaps:
+        raise ValueError("missing: " + "; ".join(gaps))
+    orders = store.kv_get("bench_orders") or []
+    if any(not o.get("paid") for o in orders):
+        return top_up_unpaid("manual")
+    today = store.iso()[:10]
+    room = s["bench_order_max_per_day"] - sum(1 for o in orders if o["at"][:10] == today)
+    names = [n.lower() for n in names][:max(0, room)]
+    allowed = set(candidates(200, taken()))
+    names = [n for n in names if n in allowed]
+    if not names:
+        raise ValueError("nothing to order: daily limit reached or the names are no longer available")
+    return place("manual:" + store.iso(), True, names, len(names))
+
+
+def top_up_unpaid(run):
+    orders = store.kv_get("bench_orders") or []
+    unpaid = [o for o in orders if not o.get("paid")]
+    ok, code = charge([o["record_id"] for o in unpaid])
+    if ok:
+        for o in orders:
+            o["paid"] = True
+        store.kv_set("bench_orders", orders)
+    _log(run, True, "order_charge", ok, {"domains": [o["domain"] for o in unpaid], "http": code})
+    return {"retried": [o["domain"] for o in unpaid], "paid": ok}

@@ -526,6 +526,28 @@ rotation.run_cycle(FakeBison(), empty)
 check(len(placed) == 1 and len(placed[0]["domains"]) == 1, "the daily order cap limits how many are bought")
 store.save_settings({"rotation_mode": "dry", "bench_autobuy": False, "bench_order_max_per_day": 5, "bench_target": 3, "bench_sender_names": []})
 store.kv_set("bench_orders", [])
+# the page's Order button: a person's confirmed click buys even with rotation dry and autobuy off, within the daily cap
+store.save_settings({"bench_sender_names": ["Jane Smith"], "bench_order_max_per_day": 2})
+placed.clear()
+pv = ordering.preview(5)
+check(len(pv["names"]) == 2 and pv["room_today"] == 2 and pv["missing"] == [] and pv["forwarding"] == "www.victig.com", "order preview: names, plan, daily room, nothing bought")
+check(placed == [], "preview buys nothing")
+r = ordering.order_now(pv["names"])
+check(len(placed) == 1 and r["ordered"] == pv["names"] and r["paid"], "confirmed Order click buys even with autobuy off and rotation in dry mode")
+try:
+    ordering.order_now(ordering.preview(1)["names"]); blocked = False
+except ValueError:
+    blocked = True
+check(blocked and len(placed) == 1, "daily limit stops a further order click")
+config.BISON_LOGIN_PASSWORD = ""
+try:
+    ordering.order_now(["victigtest.com"]); blocked = False
+except ValueError as e:
+    blocked = "missing" in str(e)
+check(blocked, "Order refuses when the Bison login is missing")
+config.BISON_LOGIN_PASSWORD = "pw"
+store.save_settings({"bench_sender_names": [], "bench_order_max_per_day": 5})
+store.kv_set("bench_orders", [])
 store.kv_set("alerts_open", {})
 
 # 17. the desk posts nowhere; /api/check hands problems to the Make daily check behind a token

@@ -14,7 +14,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import alerts, clay, config, inbox, rotation, runner, seed, slicer, store
+from . import alerts, clay, config, inbox, ordering, rotation, runner, seed, slicer, store
 
 app = FastAPI(title="Scrape Desk", docs_url=None, redoc_url=None)
 app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET or secrets.token_hex(32),
@@ -298,6 +298,28 @@ def inbox_state(request: Request):
 def rotation_state(request: Request):
     need_user(request)
     return {**rotation.bench_status(), "log": rotation.recent_log(), "heartbeat": rotation.heartbeat()}
+
+
+@app.get("/api/bench/order/preview")
+def bench_order_preview(request: Request, count: int = 1):
+    need_write(request)
+    return ordering.preview(count)
+
+
+@app.post("/api/bench/order")
+def bench_order(request: Request, body: dict = Body(...)):
+    """A person confirmed the preview: place the Hypertide order and pay for it."""
+    need_write(request)
+    names = [str(n) for n in (body.get("domains") or [])][:50]
+    try:
+        r = ordering.order_now(names)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        store.log(f"{user(request)} bench order failed: {str(e)[:200]}", "error")
+        raise HTTPException(502, str(e)[:300])
+    store.log(f"{user(request)} ordered bench domains: {', '.join(r.get('ordered') or r.get('retried') or [])}", "info")
+    return r
 
 
 @app.post("/api/rotation/dry")

@@ -98,14 +98,9 @@ a{color:var(--blue)}
   <div id="inboxBanners" style="display:grid;gap:8px"></div>
   <div class="kpis" id="inboxKpis"></div>
   <section class="card">
-    <h2>Sending domains <small id="inboxNote"></small></h2>
-    <div class="filters" id="inboxFilters"></div>
-    <div style="overflow-x:auto"><table id="inboxTable"></table></div>
-    <div class="muted small" style="margin-top:8px" id="inboxFoot"></div>
-  </section>
-  <section class="card">
     <h2>Bench &amp; rotation <small id="rotNote"></small></h2>
     <div class="filters" style="margin-bottom:8px"><button onclick="rotTest('simulate')" id="btnSim">Run test (simulation)</button><button onclick="rotTest('dry')" id="btnDry">Check now (dry run on real data)</button><span class="muted small" id="rotTestNote">The simulation uses fake data and changes nothing. Check now reads your real Bison and Hypertide but only plans; nothing is swapped or bought.</span></div>
+    <div class="filters" style="margin-bottom:8px"><button onclick="benchOrder()" id="btnOrder">Order bench domains…</button><label class="small muted">How many <input type="number" id="orderCount" min="1" max="50" value="1" style="width:60px"></label><span class="muted small">Shows the names, the plan and who the mailboxes are under, and asks you to confirm before anything is bought.</span></div>
     <div id="rotTestOut" class="small" style="margin-bottom:10px"></div>
     <div class="kpis" id="rotKpis"></div>
     <div style="overflow-x:auto"><table id="benchTable"></table></div>
@@ -113,6 +108,12 @@ a{color:var(--blue)}
     <ul class="small" id="rotPerson" style="margin:0 0 8px 18px"></ul>
     <h3 style="margin:14px 0 4px;font-size:14px">Audit log</h3>
     <div style="overflow-x:auto"><table id="rotLog"></table></div>
+  </section>
+  <section class="card">
+    <h2>Sending domains <small id="inboxNote"></small></h2>
+    <div class="filters" id="inboxFilters"></div>
+    <div style="overflow-x:auto"><table id="inboxTable"></table></div>
+    <div class="muted small" style="margin-top:8px" id="inboxFoot"></div>
   </section>
 </main>
 <main id="deskMain">
@@ -267,6 +268,21 @@ let TAB="desk", inboxData=null, inboxFilter="all";
 function showTab(t){TAB=t;document.body.classList.toggle("inboxtab",t==="inbox");$("deskMain").hidden=t!=="desk";$("inboxMain").hidden=t!=="inbox";
   $("tabDesk").classList.toggle("on",t==="desk");$("tabInbox").classList.toggle("on",t==="inbox");history.replaceState(null,"",t==="inbox"?"#inbox":location.pathname);if(t==="inbox")loadInbox()}
 async function loadInbox(){inboxData=await api("/api/inbox");renderInbox();try{renderRotation(await api("/api/rotation"))}catch(e){$("rotNote").textContent="could not load"}}
+async function benchOrder(){
+  const out=$("rotTestOut"),btn=$("btnOrder");btn.disabled=true;
+  try{
+    const n=Math.max(1,parseInt($("orderCount").value)||1),p=await api("/api/bench/order/preview?count="+n);
+    if(p.missing&&p.missing.length){out.innerHTML=`<div class="banner red">Cannot order yet. Missing: ${esc(p.missing.join("; "))}</div>`;return}
+    if(p.unpaid&&p.unpaid.length){if(!confirm(`These earlier orders are not paid yet: ${p.unpaid.join(", ")}.\nRetry the payment now? (No new order is created.)`))return;
+      const r=await api("/api/bench/order",{domains:[]});out.innerHTML=`<div class="banner ${r.paid?"green":"amber"}">${r.paid?"Paid.":"Payment not confirmed yet; try again shortly."}</div>`;loadInbox();return}
+    if(!p.names.length){out.innerHTML=`<div class="banner amber">No unused names left to suggest.</div>`;return}
+    if(!confirm(`Order ${p.names.length} domain(s) in Hypertide?\n\n${p.names.join("\n")}\n\n${p.plan}, under ${p.senders.join(", ")}, forwarding to ${p.forwarding}.\nThis charges the card on file at Hypertide. Daily limit left: ${p.room_today}.`))return;
+    const r=await api("/api/bench/order",{domains:p.names});
+    out.innerHTML=`<div class="banner ${r.paid?"green":"amber"}">Ordered ${esc((r.ordered||[]).join(", "))}. ${r.paid?"Payment confirmed.":"Payment not confirmed yet; the desk retries it, or press the button again."} They show in the bench table as warming up.</div>`;
+    loadInbox();
+  }catch(e){out.innerHTML=`<div class="banner red">${esc(e.message||String(e))}</div>`}
+  finally{btn.disabled=false}
+}
 async function rotTest(kind){
   const out=$("rotTestOut"),btn=$(kind==="dry"?"btnDry":"btnSim");btn.disabled=true;out.innerHTML=`<span class="muted">${kind==="dry"?"Checking real data (reads Bison campaigns and the Hypertide pool; can take a minute)…":"Running the simulation…"}</span>`;
   try{
