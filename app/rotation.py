@@ -63,9 +63,14 @@ class Hypertide:
         """Recovery ("Backup") pool: [{domain, status, score, eligible_at}]."""
         out, after = [], None
         while True:
-            r = requests.get("https://backend.hypertide.io/api/v1/warmup-domain-pool",
-                             params={"limit": 150, **({"afterDomain": after} if after else {})},
-                             headers={"X-API-Key": config.HYPERTIDE_API_KEY}, timeout=60)
+            for attempt in range(4):                       # Hypertide answers 503 now and then: wait and retry
+                r = requests.get("https://backend.hypertide.io/api/v1/warmup-domain-pool",
+                                 params={"limit": 150, **({"afterDomain": after} if after else {})},
+                                 headers={"X-API-Key": config.HYPERTIDE_API_KEY}, timeout=60)
+                if r.status_code in (429, 502, 503, 504) and attempt < 3:
+                    time.sleep(3 * 2 ** attempt)
+                    continue
+                break
             r.raise_for_status()
             j = r.json()
             for d in j.get("data", []):
@@ -105,7 +110,14 @@ def bench(hyper=None, fresh_dns=False):
         senders.setdefault(r["domain"], []).append(r)
     dns = store.kv_get("inbox_dns") or {}
     out = []
-    base = [{**p, "source": "pool"} for p in hyper.pool() if p["status"] != "cancelled"]
+    try:
+        pool = hyper.pool()
+        store.kv_set("bench_pool_error", None)
+    except Exception as e:     # the pool being down must not hide the domains the desk ordered itself
+        pool = []
+        store.kv_set("bench_pool_error", {"at": store.iso(), "error": str(e)[:150]})
+        store.log("bench: Hypertide pool lookup failed: " + str(e)[:150], "warn")
+    base = [{**p, "source": "pool"} for p in pool if p["status"] != "cancelled"]
     seen = {p["domain"] for p in base}
     for o in store.kv_get("bench_orders") or []:         # domains the desk ordered itself (not in the recovery pool)
         if o["domain"] in seen:
@@ -143,6 +155,8 @@ def bench_status(hyper=None):
     except Exception as e:
         b, err = [], str(e)[:150]
     ready = [x for x in b if x["ready"]]
+    pe = store.kv_get("bench_pool_error")
+    err = err or (f"Hypertide's backup pool could not be read just now ({pe['error']}); showing only the domains ordered from the desk. It retries every sync." if pe else None)
     return {"target": s["bench_target"], "ready": len(ready), "candidates": b, "error": err,
             "short_by": max(0, s["bench_target"] - len(ready)), "needs_person": NEEDS_PERSON, "mode": s["rotation_mode"],
             "daily_cap": s["rotation_daily_cap"], "swaps_today": swaps_today()}
