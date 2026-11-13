@@ -97,6 +97,35 @@ def charge(record_ids):
     return ok, f"{r.status_code} {ps or ''} {say}".strip()
 
 
+def fetch_payment_status():
+    """{domain: paymentStatus} from Hypertide's active orders (read-only)."""
+    r = requests.get(f"{API}/orders/active", headers=_headers(), timeout=60)
+    r.raise_for_status()
+    return {o["domain"].lower(): str(o.get("paymentStatus") or "") for o in r.json().get("orders", [])}
+
+
+def reconcile(run="reconcile"):
+    """If a charge went through but the desk never heard (timeout, odd answer), Hypertide still shows the order as Paid.
+    Believe Hypertide: mark those desk orders paid, so nothing is charged twice and the bench stops saying 'payment pending'."""
+    orders = store.kv_get("bench_orders") or []
+    unpaid = [o for o in orders if not o.get("paid")]
+    if not unpaid or not config.HYPERTIDE_API_KEY:
+        return []
+    try:
+        seen = fetch_payment_status()
+    except Exception as e:
+        store.log("bench: could not check Hypertide payment status: " + str(e)[:150], "warn")
+        return []
+    fixed = [o["domain"] for o in unpaid if seen.get(o["domain"], "").lower() == "paid"]
+    if fixed:
+        for o in orders:
+            if o["domain"] in fixed:
+                o["paid"] = True
+        store.kv_set("bench_orders", orders)
+        _log(run, True, "order_charge", True, {"domains": fixed, "note": "Hypertide already shows these as Paid"})
+    return fixed
+
+
 def _log(run, live, step, ok, detail):
     from . import rotation
     rotation.log(run, "live" if live else "dry", step, None, ok, detail)
@@ -106,6 +135,7 @@ def top_up(run, live, candidates_now, create=None, pay=None):
     """Order enough bench domains to reach the target. `candidates_now` is rotation.bench() output (everything counts that is
     ready or on its way). Returns what happened, for tests."""
     s = store.settings()
+    reconcile(run)
     orders = store.kv_get("bench_orders") or []
     unpaid = [o for o in orders if not o.get("paid")]
     create, pay = create or create_bulk, pay or charge
@@ -166,6 +196,7 @@ def place(run, live, names, n, create=None, pay=None):
 
 def preview(count):
     """What the Order button would do right now (nothing is bought)."""
+    reconcile("preview")
     s = store.settings()
     orders = store.kv_get("bench_orders") or []
     today = store.iso()[:10]
@@ -184,6 +215,7 @@ def order_now(names):
     gaps = missing_setup(s)
     if gaps:
         raise ValueError("missing: " + "; ".join(gaps))
+    reconcile("manual")
     orders = store.kv_get("bench_orders") or []
     if any(not o.get("paid") for o in orders):
         return top_up_unpaid("manual")

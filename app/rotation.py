@@ -124,7 +124,8 @@ def bench(hyper=None, fresh_dns=False):
             continue
         age = (store.now() - dt.datetime.fromisoformat(o["at"])).days
         st = "payment_pending" if not o.get("paid") else "ready" if age >= s["bench_min_days"] else "warming_up"
-        base.append({"domain": o["domain"], "status": st, "score": None, "eligible_at": None, "source": "ordered", "age": age})
+        hts = ((store.kv_get("hypertide_orders") or {}).get(o["domain"]) or {}).get("status")
+        base.append({"domain": o["domain"], "status": st, "score": None, "eligible_at": None, "source": "ordered", "age": age, "ht": hts})
     for p in base:
         rows = [x for x in senders.get(p["domain"], []) if x["status"] == "Connected"]
         scores = [x["warmup_score"] for x in rows if x["warmup_score"] is not None]
@@ -132,7 +133,9 @@ def bench(hyper=None, fresh_dns=False):
         d = fresh_dns and inbox.fetch_dns(p["domain"]) or dns.get(p["domain"]) or {}
         dns_ok = bool(d.get("spf") and d.get("dmarc") and d.get("mx") and not d.get("error"))
         reason = None
-        if p["status"] != "ready":
+        if p.get("ht") in ("Todo", "In progress") and p["status"] != "payment_pending":
+            reason = f"Hypertide is still setting it up ({p['ht']}); ordered {p['age']} days ago"
+        elif p["status"] != "ready":
             reason = "still " + str(p["status"]).replace("_", " ") + (f" (ordered {p['age']} days ago)" if p.get("age") is not None else "")
         elif p["source"] == "pool" and (p["score"] is None or p["score"] < s["bench_min_score"]):
             reason = f"recovery score {p['score']} under {s['bench_min_score']}"
@@ -148,6 +151,7 @@ def bench(hyper=None, fresh_dns=False):
 
 
 def bench_status(hyper=None):
+    ordering.reconcile()
     s = store.settings()
     try:
         b = bench(hyper)
@@ -168,6 +172,7 @@ def run_cycle(bison=None, hyper=None, force_dry=False):
     """One pass: find Retire-zone domains, swap bench domains in (up to the daily cap). Never raises.
     `force_dry` (the page's "Check now" button) plans everything on real data but changes and buys nothing,
     whatever the mode is set to."""
+    ordering.reconcile()
     s = store.settings()
     mode = "dry" if force_dry else s["rotation_mode"]
     if mode == "off":
