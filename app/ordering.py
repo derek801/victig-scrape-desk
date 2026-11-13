@@ -80,9 +80,21 @@ def create_bulk(body):
 
 
 def charge(record_ids):
-    r = requests.post(f"{API}/payments/charge", json={"recordIds": record_ids}, headers=_headers(), timeout=120)
-    ok = r.status_code == 200 and (r.json().get("paymentStatus") or r.json().get("data", {}).get("paymentStatus")) in ("paid", "no_payment_required")
-    return ok, r.status_code
+    """Pay for unpaid orders. Returns (ok, note): `note` is the HTTP status plus Hypertide's own words, for the audit log.
+    Per Hypertide's guide a 200 means paid (or nothing to pay); 202 / 402 mean not confirmed yet and the same call is retried."""
+    try:
+        r = requests.post(f"{API}/payments/charge", json={"recordIds": record_ids}, headers=_headers(), timeout=120)
+    except Exception as e:
+        return False, "error: " + str(e)[:150]
+    try:
+        j = r.json()
+    except Exception:
+        j = {}
+    j = j if isinstance(j, dict) else {}
+    ps = j.get("paymentStatus") or (j.get("data") or {}).get("paymentStatus") if isinstance(j.get("data") or {}, dict) else j.get("paymentStatus")
+    ok = r.status_code == 200 and j.get("success", True) is not False and ps not in ("pending", "partially_paid")
+    say = str(j.get("message") or j.get("error") or "")[:150]
+    return ok, f"{r.status_code} {ps or ''} {say}".strip()
 
 
 def _log(run, live, step, ok, detail):

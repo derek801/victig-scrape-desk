@@ -188,7 +188,7 @@ const fmt=n=>(n??0).toLocaleString();
 const ago=iso=>{if(!iso)return "never";const m=(Date.now()-new Date(iso))/6e4;if(m<60)return Math.round(m)+"m ago";if(m<1440)return Math.round(m/60)+"h ago";return Math.round(m/1440)+"d ago"};
 const tLocal=iso=>iso?new Date(iso).toLocaleString([], {weekday:"short",hour:"numeric",minute:"2-digit"}):"";
 async function api(path,body){const r=await fetch(path,{method:body===undefined?"GET":"POST",headers:{"content-type":"application/json","x-desk":"1"},body:body===undefined?undefined:JSON.stringify(body)});
-  if(r.status===401){location.href="/login";return}const j=await r.json();if(!r.ok){alert(j.error||r.status);throw j}return j}
+  if(r.status===401){location.href="/login";return}const j=await r.json();if(!r.ok){alert(typeof j.detail==="string"?j.detail:j.error||r.status);throw j}return j}
 
 async function load(){S=await api("/api/state");render()}
 function render(){
@@ -280,7 +280,7 @@ async function benchOrder(){
     const r=await api("/api/bench/order",{domains:p.names});
     out.innerHTML=`<div class="banner ${r.paid?"green":"amber"}">Ordered ${esc((r.ordered||[]).join(", "))}. ${r.paid?"Payment confirmed.":"Payment not confirmed yet; the desk retries it, or press the button again."} They show in the bench table as warming up.</div>`;
     loadInbox();
-  }catch(e){out.innerHTML=`<div class="banner red">${esc(e.message||String(e))}</div>`}
+  }catch(e){out.innerHTML=`<div class="banner red">${esc(typeof e==="string"?e:e.detail||e.message||e.error||JSON.stringify(e))}</div>`}
   finally{btn.disabled=false}
 }
 async function rotTest(kind){
@@ -296,12 +296,12 @@ async function rotTest(kind){
       out.innerHTML=`<div class="banner amber">Dry run on real data. Nothing was changed or bought.</div><ul style="margin:6px 0 0 18px"><li>Domains in the Retire zone: ${(x.retire||[]).length?esc(x.retire.join(", ")):"none"}</li><li>Swaps it would make: ${sw.length?sw.join("; "):"none"}${x.skipped?` <b>Stopped:</b> ${esc({mass:`${(x.retire||[]).length} domains are in Retire at once, more than the limit of ${x.mass_limit}. That pattern usually means a bad list or bad copy rather than burnt domains, so nothing is swapped until a person decides`,cap:"the daily swap cap is reached","bench-empty":"there is no ready bench domain","error":"an error happened (see the log below)"}[x.skipped]||x.skipped)}.`:""}</li><li>Bench domains ready: ${r.status.ready} of ${r.status.target}</li><li>Would order: ${(o.would_order||[]).length?esc(o.would_order.join(", "))+(o.missing&&o.missing.length?` — cannot yet, missing: ${esc(o.missing.join("; "))}`:""):"nothing"}</li></ul>`;
       renderRotation(await api("/api/rotation"));
     }
-  }catch(e){out.innerHTML=`<div class="banner red">${esc(e.message||String(e))}</div>`}
+  }catch(e){out.innerHTML=`<div class="banner red">${esc(typeof e==="string"?e:e.detail||e.message||e.error||JSON.stringify(e))}</div>`}
   btn.disabled=false;
 }
 function renderRotation(r){
   const mode={off:"Off",dry:"Dry run: plans and logs, changes nothing",live:"Live: swaps for real"}[r.mode]||r.mode,hb=r.heartbeat||{};
-  $("rotNote").textContent=mode;
+  $("rotNote").textContent=mode+(r.error&&(r.candidates||[]).length?" · "+r.error:"");
   $("rotKpis").innerHTML=[[`${r.ready} / ${r.target}`,"Bench domains ready"],[fmt(r.short_by),"Short of target"],[`${r.swaps_today} / ${r.daily_cap}`,"Live swaps today / daily cap"],[fmt(hb.swaps_live),"Swaps, last 7 days"],[fmt(hb.swaps_planned_dry),"Would-be swaps (dry), 7 days"],[`${fmt(hb.errors)} / ${fmt(hb.errors_recovered)}`,"Errors / recovered, 7 days"]]
     .map(([v,l],i)=>`<div class="kpi"><div class="v" style="${i===1&&r.short_by?"color:var(--amber)":""}">${v}</div><div class="l">${l}</div></div>`).join("");
   const rows=(r.candidates||[]).map(c=>`<tr><td><b>${esc(c.domain)}</b></td><td><span class="pill ${c.ready?"healthy":"watch"}">${c.ready?"Ready":"Not yet"}</span></td><td class="small">${esc(c.reason||"warm and DNS verified")}</td><td>${c.warmup==null?"–":c.warmup}</td><td>${c.score==null?"–":c.score}</td><td>${c.mailboxes}</td><td>${c.dns_ok?"ok":"not verified"}</td><td class="muted small">${esc((c.eligible_at||"").slice(0,10))}</td></tr>`).join("");

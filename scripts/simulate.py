@@ -478,6 +478,18 @@ store.save_settings({"rotation_mode": "dry"})
 rotation.run_cycle(FakeBison(), hyper)
 hb = rotation.heartbeat()
 check(hb["errors"] >= 1 and hb["errors_recovered"] >= 1 and "bench_target" in hb, "heartbeat counts errors and recoveries")
+class DownHyper:
+    def pool(self):
+        raise RuntimeError("503 Server Error: Service Unavailable")
+
+
+store.kv_set("bench_orders", [{"domain": "victigordered.com", "record_id": "r1", "at": store.iso(), "paid": True}])
+st = rotation.bench_status(DownHyper())
+check(len(st["candidates"]) == 1 and st["candidates"][0]["domain"] == "victigordered.com" and "could not be read" in (st["error"] or ""),
+      "Hypertide pool down (503): ordered domains still show, with a plain note instead of a failure")
+check(rotation.run_cycle(FakeBison(), DownHyper())["skipped"] != "error", "a pool outage does not make rotation raise an error alert")
+store.kv_set("bench_pool_error", None)
+store.kv_set("bench_orders", [])
 check("Inbox rotation" in rotation.summary() and "errors" in rotation.summary(), "weekly summary sentence for the daily check")
 store.save_settings({"rotation_mode": "off"})
 check(rotation.run_cycle(bison, hyper) == {"mode": "off"}, "off means off")
