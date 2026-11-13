@@ -490,6 +490,27 @@ check(len(st["candidates"]) == 1 and st["candidates"][0]["domain"] == "victigord
 check(rotation.run_cycle(FakeBison(), DownHyper())["skipped"] != "error", "a pool outage does not make rotation raise an error alert")
 store.kv_set("bench_pool_error", None)
 store.kv_set("bench_orders", [])
+# a charge went through but the desk never heard: Hypertide shows Paid, so the desk believes it and does not charge again
+store.kv_set("bench_orders", [{"domain": "victigpaid.com", "record_id": "r9", "at": store.iso(), "paid": False},
+                              {"domain": "victigunpaid.com", "record_id": "r10", "at": store.iso(), "paid": False}])
+config.HYPERTIDE_API_KEY = "y"
+ordering.fetch_payment_status = lambda: {"victigpaid.com": "Paid", "victigunpaid.com": "Unpaid"}
+check(ordering.reconcile() == ["victigpaid.com"] and [o["paid"] for o in store.kv_get("bench_orders")] == [True, False],
+      "an order Hypertide already shows as Paid is marked paid; an unpaid one stays unpaid")
+charged2 = []
+config.BISON_LOGIN_EMAIL, config.BISON_LOGIN_PASSWORD, config.BISON_WORKSPACE = "ops@example.test", "pw", "ws"
+store.save_settings({"bench_sender_names": ["Jane Smith"]})
+ordering.charge = lambda ids: (charged2.append(ids), (True, "200"))[1]
+ordering.order_now([])
+check(charged2 == [["r10"]], "only the genuinely unpaid order is retried, never the paid one")
+store.kv_set("hypertide_orders", {"victigunpaid.com": {"status": "Todo"}})
+store.kv_set("bench_orders", [{"domain": "victigunpaid.com", "record_id": "r10", "at": store.iso(), "paid": True}])
+c = rotation.bench_status(FakeHyper([]))["candidates"][0]
+check("Hypertide is still setting it up (Todo)" in c["reason"], "bench shows Hypertide's own setup status for ordered domains")
+store.kv_set("hypertide_orders", {})
+store.kv_set("bench_orders", [])
+store.save_settings({"bench_sender_names": []})
+config.BISON_LOGIN_EMAIL = config.BISON_LOGIN_PASSWORD = config.BISON_WORKSPACE = ""
 check("Inbox rotation" in rotation.summary() and "errors" in rotation.summary(), "weekly summary sentence for the daily check")
 store.save_settings({"rotation_mode": "off"})
 check(rotation.run_cycle(bison, hyper) == {"mode": "off"}, "off means off")
