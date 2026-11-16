@@ -83,6 +83,17 @@ class Hypertide:
             time.sleep(2)
 
 
+def notice(key, text=None):
+    """Business states (too many domains retired, bench empty) are shown on the page only. The 10am check is about whether
+    the automation WORKS, so these never become alerts; only rotation errors do."""
+    n = store.kv_get("rotation_notices") or {}
+    if text:
+        n[key] = text
+    else:
+        n.pop(key, None)
+    store.kv_set("rotation_notices", n)
+
+
 # ---- logging and state ---------------------------------------------------------------------------
 
 def log(run, mode, step, domain, ok, detail):
@@ -162,7 +173,7 @@ def bench_status(hyper=None):
     pe = store.kv_get("bench_pool_error")
     err = err or (f"Hypertide's backup pool could not be read just now ({pe['error']}); showing only the domains ordered from the desk. It retries every sync." if pe else None)
     return {"target": s["bench_target"], "ready": len(ready), "candidates": b, "error": err,
-            "short_by": max(0, s["bench_target"] - len(ready)), "needs_person": NEEDS_PERSON, "mode": s["rotation_mode"],
+            "short_by": max(0, s["bench_target"] - len(ready)), "notices": list((store.kv_get("rotation_notices") or {}).values()), "needs_person": NEEDS_PERSON, "mode": s["rotation_mode"],
             "daily_cap": s["rotation_daily_cap"], "swaps_today": swaps_today()}
 
 
@@ -188,17 +199,17 @@ def run_cycle(bison=None, hyper=None, force_dry=False):
         result["retire"] = [d["domain"] for d in retire]
         result["mass_limit"] = s["rotation_mass_limit"]
         if len(retire) > s["rotation_mass_limit"]:
-            alerts.raise_alert(MASS_KEY, f"{len(retire)} domains hit Retire at once, so rotation stopped (that pattern usually means a bad "
-                               "list or bad copy, not burnt domains). Nothing was swapped.", grace_min=0, remind_h=24, link="/#inbox")
+            notice(MASS_KEY, f"{len(retire)} domains hit Retire at once, so rotation stopped (that pattern usually means a bad "
+                   "list or bad copy, not burnt domains). Nothing was swapped.")
             log(run, mode, "mass_stop", None, False, {"retire": len(retire), "limit": s["rotation_mass_limit"]})
             result["skipped"] = "mass"
             return result
-        alerts.clear(MASS_KEY)
+        notice(MASS_KEY)
         allb = bench(hyper, fresh_dns=bool(retire))
         b = [x for x in allb if x["ready"]]
         store.kv_set("bench_ready", {"n": len(b), "at": store.iso()})
         if not retire:
-            alerts.clear(EMPTY_KEY)
+            notice(EMPTY_KEY)
             if len(b) < s["bench_target"]:
                 result["orders"] = ordering.top_up(run, live, allb)
             _finish_ok(run, mode)
@@ -212,12 +223,11 @@ def run_cycle(bison=None, hyper=None, force_dry=False):
         bison = bison or Bison()
         for d in sorted(retire, key=lambda x: x["health"]["score"] if x["health"]["score"] is not None else 0)[:room]:
             if not b:
-                alerts.raise_alert(EMPTY_KEY, f"{d['domain']} needs replacing but the bench has no ready domain. A person needs to order "
-                                   "more bench domains.", grace_min=0, remind_h=24, link="/#inbox")
+                notice(EMPTY_KEY, f"{d['domain']} needs replacing but the bench has no ready domain. Order more bench domains.")
                 log(run, mode, "bench_empty", d["domain"], False, {})
                 result["skipped"] = "bench-empty"
                 break
-            alerts.clear(EMPTY_KEY)
+            notice(EMPTY_KEY)
             repl = b.pop(0)
             result["swaps"].append(_swap(run, live, bison, d, repl, life))
         left = len(b)

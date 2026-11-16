@@ -455,8 +455,8 @@ check(r["skipped"] == "cap" and len(bison.calls) == n_calls, "daily cap stops a 
 # no ready bench -> alert, nothing swapped
 store.x("DELETE FROM rotation_log")
 r = rotation.run_cycle(bison, FakeHyper([]))
-check(r["skipped"] == "bench-empty" and "bench has no ready domain" in " ".join(a["text"] for a in alerts.due_alerts().values()),
-      "empty bench is an alert, not a silent skip")
+check(r["skipped"] == "bench-empty" and "no ready domain" in " ".join(rotation.bench_status(FakeHyper([]))["notices"]) and alerts.due_alerts() == {},
+      "empty bench shows a notice on the page, and is not an alert for the 10am check")
 # DNS broken at swap time -> candidate rejected
 inbox.fetch_dns = lambda d: {"spf": False, "dmarc": True, "mx": True, "dkim": True}
 check(rotation.bench(hyper, fresh_dns=True)[0]["ready"] is False, "replacement with broken DNS is not used")
@@ -465,7 +465,8 @@ inbox.fetch_dns = lambda d: dict(dns_ok)
 store.save_settings({"rotation_mass_limit": 0})
 store.kv_set("domain_lifecycle", {})
 r = rotation.run_cycle(bison, hyper)
-check(r["skipped"] == "mass" and len(r["retire"]) >= 1 and r["mass_limit"] == 0 and any("at once" in a["text"] for a in alerts.due_alerts().values()), "more Retire domains than the limit: stop and alert")
+check(r["skipped"] == "mass" and len(r["retire"]) >= 1 and r["mass_limit"] == 0 and any("at once" in t for t in rotation.bench_status(FakeHyper([]))["notices"])
+      and alerts.due_alerts() == {}, "more Retire domains than the limit: stop, show a page notice, no alert for the 10am check")
 store.save_settings({"rotation_mass_limit": 3})
 # errors raise an alert, and recovering logs it
 class Boom(FakeBison):

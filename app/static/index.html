@@ -101,6 +101,7 @@ a{color:var(--blue)}
     <h2>Bench &amp; rotation <small id="rotNote"></small></h2>
     <div class="filters" style="margin-bottom:8px"><button onclick="rotTest('simulate')" id="btnSim">Run test (simulation)</button><button onclick="rotTest('dry')" id="btnDry">Check now (dry run on real data)</button><span class="muted small" id="rotTestNote">The simulation uses fake data and changes nothing. Check now reads your real Bison and Hypertide but only plans; nothing is swapped or bought.</span></div>
     <div class="filters" style="margin-bottom:8px"><button onclick="benchOrder()" id="btnOrder">Order bench domains…</button><label class="small muted">How many <input type="number" id="orderCount" min="1" max="50" value="1" style="width:60px"></label><span class="muted small">Shows the names, the plan and who the mailboxes are under, and asks you to confirm before anything is bought.</span></div>
+    <div id="rotNotices"></div>
     <div id="rotTestOut" class="small" style="margin-bottom:10px"></div>
     <div class="kpis" id="rotKpis"></div>
     <div style="overflow-x:auto"><table id="benchTable"></table></div>
@@ -301,6 +302,7 @@ async function rotTest(kind){
 }
 function renderRotation(r){
   const mode={off:"Off",dry:"Dry run: plans and logs, changes nothing",live:"Live: swaps for real"}[r.mode]||r.mode,hb=r.heartbeat||{};
+  $("rotNotices").innerHTML=(r.notices||[]).map(t=>`<div class="banner amber" style="margin-bottom:6px">${esc(t)}</div>`).join("");
   $("rotNote").textContent=mode+(r.error&&(r.candidates||[]).length?" · "+r.error:"");
   $("rotKpis").innerHTML=[[`${r.ready} / ${r.target}`,"Bench domains ready"],[fmt(r.short_by),"Short of target"],[`${r.swaps_today} / ${r.daily_cap}`,"Live swaps today / daily cap"],[fmt(hb.swaps_live),"Swaps, last 7 days"],[fmt(hb.swaps_planned_dry),"Would-be swaps (dry), 7 days"],[`${fmt(hb.errors)} / ${fmt(hb.errors_recovered)}`,"Errors / recovered, 7 days"]]
     .map(([v,l],i)=>`<div class="kpi"><div class="v" style="${i===1&&r.short_by?"color:var(--amber)":""}">${v}</div><div class="l">${l}</div></div>`).join("");
