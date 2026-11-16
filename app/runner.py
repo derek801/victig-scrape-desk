@@ -14,6 +14,7 @@ from . import alerts, clay, config, geo, pb, searchurl, slicer, store
 
 TICK_S = 60
 MAX_SLICE_ATTEMPTS = 3
+STALL_HOURS = 3             # real runs take 30-60 minutes; one still "running" after this long is stuck on PhantomBuster's side
 BREAKER_ACCOUNTS = 3        # this many accounts needing attention at once = stop everything
 
 
@@ -121,6 +122,7 @@ def set_ok(acct):
     store.x("UPDATE accounts SET status='ok', status_note=NULL, status_since=NULL, fail_streak=0 WHERE key=?",
             (acct["key"],))
     alerts.clear(f"acct:{acct['key']}")
+    alerts.clear(f"stall:{acct['key']}", quiet=True)
 
 
 def retry_attention():
@@ -154,10 +156,42 @@ def poll():
             continue
         status = c.get("status")
         if status == "running" or status == "starting" or status == "queued":
+            if _hours_since(run["launched_at"]) >= STALL_HOURS:
+                stalled(run)
+                continue
             if run["status"] != "running":
                 store.x("UPDATE runs SET status='running' WHERE id=?", (run["id"],))
             continue
         finish(run, c)
+
+
+def _hours_since(iso):
+    try:
+        return (store.now() - dt.datetime.fromisoformat(iso)).total_seconds() / 3600
+    except (TypeError, ValueError):
+        return 0
+
+
+def stalled(run):
+    """PhantomBuster still calls this run 'running' long after any real run would be over (it has happened: a run showed
+    running for five days with no output while the phantom itself was idle). Free the account: ask PhantomBuster to stop,
+    fail the run, put the slice back in line, and raise an alert so the daily check hears about it."""
+    acct = store.q1("SELECT * FROM accounts WHERE key=?", (run["account_key"],))
+    sl = store.q1("SELECT * FROM slices WHERE id=?", (run["slice_id"],))
+    hrs = round(_hours_since(run["launched_at"]))
+    try:
+        pb.stop(acct["agent_id"])
+    except pb.PBError as e:
+        store.log(f"{acct['name']}: stop request failed: {str(e)[:150]}", "warn")
+    store.x("UPDATE runs SET status='failed', finished_at=?, errors=? WHERE id=?",
+            (store.iso(), json.dumps([f"stalled: PhantomBuster still reported running after {hrs} hours"]), run["id"]))
+    if sl:
+        store.x("UPDATE slices SET status='pending', attempts=COALESCE(attempts,0)+1, note=? WHERE id=?",
+                (f"run stalled on PhantomBuster after {hrs}h", sl["id"]))
+    store.log(f"{acct['name']}: run {run['container_id']} was still 'running' after {hrs} hours; cleared it, slice {run['slice_id']} goes back in line", "warn")
+    alerts.raise_alert(f"stall:{acct['key']}", f"{acct['name']}'s PhantomBuster run was stuck 'running' for {hrs} hours. The desk cleared it "
+                       "and will try again.", grace_min=0, remind_h=24)
+    _schedule_next(acct["key"], (10, 30))
 
 
 def finish(run, c):
@@ -252,9 +286,12 @@ def launch_one(acct):
     sl, url, cs = plan
     try:
         latest = pb.containers(acct["agent_id"], limit=1)
-        if latest and latest[0].get("status") == "running":   # a rep launched it by hand; wait
-            _schedule_next(acct["key"], (20, 40))
-            return
+        if latest and latest[0].get("status") == "running":
+            age_h = (time.time() * 1000 - (latest[0].get("createdAt") or time.time() * 1000)) / 3.6e6
+            if age_h < STALL_HOURS:                          # a rep launched it by hand; wait
+                _schedule_next(acct["key"], (20, 40))
+                return
+            store.log(f"{acct['name']}: ignoring a PhantomBuster run that has said 'running' for {round(age_h)} hours", "warn")
         arg = pb.agent_argument(acct["agent_id"])
         arg.update({"inputType": "salesNavigatorSearchUrl", "salesNavigatorSearchUrl": url,
                     "numberOfProfiles": 2500, "numberOfResultsPerSearch": 2500})

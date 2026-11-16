@@ -288,6 +288,45 @@ check(not runner.due(store.q1("SELECT * FROM accounts WHERE key='max'")), "held 
 clay.update(t2["id"], {"rows": 100})
 check(not clay.held("max") and runner.due(store.q1("SELECT * FROM accounts WHERE key='max'")), "hold lifts once the count is back down")
 
+# 14b. a run PhantomBuster never ends (it showed "running" for five days) is cleared by the watchdog, not waited on forever
+finish_all(total=1500)
+runner.tick()
+store.x("DELETE FROM runs WHERE account_key='max' AND source='desk'")
+store.x("UPDATE accounts SET status='ok', enabled=1, daily_budget=100000 WHERE key='max'")
+store.save_settings({"max_launches_per_day": 50})
+store.kv_set("alerts_open", {})
+stops = []
+pb.stop = lambda agent_id: stops.append(agent_id) or {"alreadyStopped": True}
+force_due()
+runner.tick()
+zr = store.q1("SELECT * FROM runs WHERE account_key='max' AND source='desk' AND status IN ('launched','running')")
+check(zr is not None, "max launched a run that will never finish")
+runner.tick()
+check(store.q1("SELECT status FROM runs WHERE id=?", (zr["id"],))["status"] == "running" and not stops, "a run that is only minutes old is left alone")
+store.x("UPDATE runs SET launched_at=? WHERE id=?", (store.iso(store.now() - dt.timedelta(hours=4)), zr["id"]))
+runner.tick()
+zz = store.q1("SELECT * FROM runs WHERE id=?", (zr["id"],))
+check(zz["status"] == "failed" and "stalled" in zz["errors"] and stops, "after 3 hours: stop requested, run failed as stalled")
+check(store.q1("SELECT status FROM slices WHERE id=?", (zr["slice_id"],))["status"] == "pending", "its slice goes back in line")
+check("max" in " ".join(a["text"].lower() for a in alerts.due_alerts().values()) or any("stuck" in a["text"] for a in alerts.due_alerts().values()),
+      "an alert tells the daily check the automation was stuck")
+check(store.q1("SELECT status FROM accounts WHERE key='max'")["status"] == "ok", "the account is not blocked or sent to 'needs attention'")
+now_ms = store.now().timestamp() * 1000
+pb.containers = lambda agent_id, limit=20: [{"id": "old", "status": "running", "createdAt": now_ms - 100 * 3.6e6}]
+force_due()
+runner.tick()
+check(store.q1("SELECT 1 FROM runs WHERE account_key='max' AND source='desk' AND status IN ('launched','running')") is not None,
+      "a phantom whose latest run has said 'running' for 100 hours no longer blocks new launches")
+pb.containers = lambda agent_id, limit=20: [{"id": "fresh", "status": "running", "createdAt": now_ms - 1 * 3.6e6}]
+finish_all(total=1500)
+runner.tick()
+force_due()
+n_before = len(store.q("SELECT 1 FROM runs WHERE account_key='max' AND source='desk'"))
+runner.tick()
+check(len(store.q("SELECT 1 FROM runs WHERE account_key='max' AND source='desk'")) == n_before, "a recent 'running' run (a rep launched by hand) still makes the desk wait")
+pb.containers = lambda agent_id, limit=20: []
+check(not any("stuck" in a["text"] for a in alerts.due_alerts().values()), "the stall alert clears once a run finishes properly")
+
 # 15. Inbox Health: lifetime bounce per domain, bands, grouped alerts, Google Chat card
 def mk(i, dom, sent, bounced, status="Connected", replied=0):
     return {"id": i, "email": f"u{i}@{dom}", "status": status, "warmup_enabled": True, "daily_limit": 5,

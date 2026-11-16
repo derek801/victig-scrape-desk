@@ -58,6 +58,11 @@ def launch(agent_id, argument):
     return str(cid)
 
 
+def stop(agent_id):
+    """Ask PhantomBuster to stop an agent. It answers {'alreadyStopped': True} when nothing is running."""
+    return _call("POST", "/agents/stop", json={"id": agent_id})
+
+
 def containers(agent_id, limit=20):
     r = _call("GET", "/containers/fetch-all", params={"agentId": agent_id, "limit": limit})
     return r.get("containers", r if isinstance(r, list) else [])

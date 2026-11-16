@@ -306,8 +306,8 @@ def summary(days=7):
             f"{h['errors']} errors, {h['errors_recovered']} recovered.")
 
 
-def recent_log(n=40):
-    rows = store.q("SELECT ts, mode, step, domain, ok, detail FROM rotation_log ORDER BY id DESC LIMIT ?", (n,))
+def recent_log(n=150):
+    rows = store.q("SELECT ts, run, mode, step, domain, ok, detail FROM rotation_log ORDER BY id DESC LIMIT ?", (n,))
     for r in rows:
         r["detail"] = json.loads(r["detail"]) if r["detail"] else {}
     return rows
