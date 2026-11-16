@@ -101,13 +101,14 @@ a{color:var(--blue)}
     <h2>Bench &amp; rotation <small id="rotNote"></small></h2>
     <div class="filters" style="margin-bottom:8px"><button onclick="rotTest('simulate')" id="btnSim">Run test (simulation)</button><button onclick="rotTest('dry')" id="btnDry">Check now (dry run on real data)</button><span class="muted small" id="rotTestNote">The simulation uses fake data and changes nothing. Check now reads your real Bison and Hypertide but only plans; nothing is swapped or bought.</span></div>
     <div class="filters" style="margin-bottom:8px"><button onclick="benchOrder()" id="btnOrder">Order bench domains…</button><label class="small muted">How many <input type="number" id="orderCount" min="1" max="50" value="1" style="width:60px"></label><span class="muted small">Shows the names, the plan and who the mailboxes are under, and asks you to confirm before anything is bought.</span></div>
+    <div id="rotNotices"></div>
     <div id="rotTestOut" class="small" style="margin-bottom:10px"></div>
     <div class="kpis" id="rotKpis"></div>
     <div style="overflow-x:auto"><table id="benchTable"></table></div>
     <h3 style="margin:14px 0 4px;font-size:14px">Still needs a person</h3>
     <ul class="small" id="rotPerson" style="margin:0 0 8px 18px"></ul>
-    <h3 style="margin:14px 0 4px;font-size:14px">Audit log</h3>
-    <div style="overflow-x:auto"><table id="rotLog"></table></div>
+    <h3 style="margin:14px 0 4px;font-size:14px">Audit log <small class="muted">(latest 3 checks; older ones in the dropdown)</small></h3>
+    <div id="rotLog"></div>
   </section>
   <section class="card">
     <h2>Sending domains <small id="inboxNote"></small></h2>
@@ -301,13 +302,18 @@ async function rotTest(kind){
 }
 function renderRotation(r){
   const mode={off:"Off",dry:"Dry run: plans and logs, changes nothing",live:"Live: swaps for real"}[r.mode]||r.mode,hb=r.heartbeat||{};
+  $("rotNotices").innerHTML=(r.notices||[]).map(t=>`<div class="banner amber" style="margin-bottom:6px">${esc(t)}</div>`).join("");
   $("rotNote").textContent=mode+(r.error&&(r.candidates||[]).length?" · "+r.error:"");
   $("rotKpis").innerHTML=[[`${r.ready} / ${r.target}`,"Bench domains ready"],[fmt(r.short_by),"Short of target"],[`${r.swaps_today} / ${r.daily_cap}`,"Live swaps today / daily cap"],[fmt(hb.swaps_live),"Swaps, last 7 days"],[fmt(hb.swaps_planned_dry),"Would-be swaps (dry), 7 days"],[`${fmt(hb.errors)} / ${fmt(hb.errors_recovered)}`,"Errors / recovered, 7 days"]]
     .map(([v,l],i)=>`<div class="kpi"><div class="v" style="${i===1&&r.short_by?"color:var(--amber)":""}">${v}</div><div class="l">${l}</div></div>`).join("");
   const rows=(r.candidates||[]).map(c=>`<tr><td><b>${esc(c.domain)}</b></td><td><span class="pill ${c.ready?"healthy":"watch"}">${c.ready?"Ready":"Not yet"}</span></td><td class="small">${esc(c.reason||"warm and DNS verified")}</td><td>${c.warmup==null?"–":c.warmup}</td><td>${c.score==null?"–":c.score}</td><td>${c.mailboxes}</td><td>${c.dns_ok?"ok":"not verified"}</td><td class="muted small">${esc((c.eligible_at||"").slice(0,10))}</td></tr>`).join("");
   $("benchTable").innerHTML=`<tr><th>Bench domain</th><th>State</th><th>Why</th><th>Warm-up score</th><th>Recovery score</th><th>Mailboxes in Bison</th><th>DNS</th><th>Ready date</th></tr>${rows||`<tr><td colspan="8" class="muted">${r.error?esc(r.error):"No bench domains yet: the Hypertide backup pool is empty."}</td></tr>`}`;
   $("rotPerson").innerHTML=(r.needs_person||[]).map(t=>`<li>${esc(t)}</li>`).join("");
-  $("rotLog").innerHTML=`<tr><th>When</th><th>Mode</th><th>Step</th><th>Domain</th><th>Detail</th></tr>`+((r.log||[]).map(x=>`<tr><td class="muted small">${ago(x.ts)}</td><td>${x.mode}</td><td>${x.ok?"":"⚠ "}${esc(x.step)}</td><td>${esc(x.domain||"")}</td><td class="small">${esc(JSON.stringify(x.detail))}</td></tr>`).join("")||`<tr><td colspan="5" class="muted">Nothing yet.</td></tr>`);
+  const groups=[],byRun={};
+  (r.log||[]).forEach(x=>{const k=x.run||x.ts;if(!byRun[k]){byRun[k]={run:k,ts:x.ts,mode:x.mode,rows:[]};groups.push(byRun[k])}byRun[k].rows.unshift(x)});
+  const grp=g=>`<div style="border:1px solid var(--line,#e3e8ef);border-radius:8px;padding:8px 10px;margin-bottom:6px"><div><b>${ago(g.ts)}</b> <span class="muted small">· ${g.mode==="live"?"live":"dry run"} · ${g.rows.length} step${g.rows.length===1?"":"s"}</span>${g.rows.some(x=>!x.ok)?` <span class="att small">⚠ problem</span>`:""}</div><div class="small" style="margin-top:4px">${g.rows.map(x=>`<div>${x.ok?"":"⚠ "}<b>${esc(x.step)}</b>${x.domain?" · "+esc(x.domain):""} <span class="muted">${esc(JSON.stringify(x.detail))}</span></div>`).join("")}</div></div>`;
+  const wasOpen=$("rotLog").querySelector("details")?.open;
+  $("rotLog").innerHTML=groups.length?groups.slice(0,3).map(grp).join("")+(groups.length>3?`<details${wasOpen?" open":""}><summary class="muted" style="cursor:pointer;margin:4px 0">Older checks (${groups.length-3})</summary>${groups.slice(3).map(grp).join("")}</details>`:""):`<div class="muted">Nothing yet.</div>`;
 }
 async function inboxSync(){await api("/api/inbox/sync",{});$("inboxNote").textContent="syncing… (takes a couple of minutes)";setTimeout(loadInbox,20000)}
 function spark(v){if(!v||v.length<2)return "";const w=64,h=18,lo=Math.min(...v),hi=Math.max(...v),r=hi-lo||1;
