@@ -8,6 +8,7 @@ Lifetime rate = bounced / sent, added up over every mailbox on a domain, judged 
 `inbox_min_sends` sends. Bison's own bands: under 2% fine, 2-3% warning, 3%+ critical. Whole domains are judged,
 not single mailboxes, because Hypertide replaces by domain and one mailbox's few sends are too noisy."""
 import datetime as dt
+import re
 import threading
 import time
 import traceback
@@ -20,6 +21,35 @@ from . import alerts, config, health, store
 SYNC_EVERY_S = 6 * 3600
 MAX_CRIT_ALERTS = 5          # more critical domains than this at once = one summary, not one message each
 _running = threading.Lock()
+
+
+# ---- canceled domains ----------------------------------------------------------------------------
+
+def canceled():
+    """Domains Hypertide has canceled. Their mailboxes are still listed in Bison (dead or stale), so they are left out of every
+    Inbox Health number. Source: data/canceled_domains.txt (Hypertide support's list) plus any added under `canceled_domains`."""
+    out = set()
+    f = config.SEED_DIR / "canceled_domains.txt"
+    if f.exists():
+        out |= {l.strip().lower() for l in f.read_text().splitlines() if l.strip() and not l.startswith("#")}
+    out |= {str(d).strip().lower() for d in (store.kv_get("canceled_domains") or [])}
+    return {d for d in out if re.fullmatch(r"[a-z0-9.-]+", d)}
+
+
+def live_sql():
+    """SQL condition keeping only domains that are not canceled (names are validated, so inlining them is safe)."""
+    c = sorted(canceled())
+    return "1=1" if not c else "domain NOT IN (" + ",".join(f"'{d}'" for d in c) + ")"
+
+
+def canceled_summary():
+    c = sorted(canceled())
+    if not c:
+        return None
+    q = ",".join(f"'{d}'" for d in c)
+    r = store.q1(f"SELECT COUNT(DISTINCT domain) domains, COUNT(*) mailboxes, COALESCE(SUM(status!='Connected'),0) not_connected, "
+                 f"COALESCE(SUM(status='Connected'),0) still_connected FROM inbox_senders WHERE domain IN ({q})")
+    return r if r and r["mailboxes"] else None
 
 
 # ---- fetching ------------------------------------------------------------------------------------
@@ -250,7 +280,7 @@ def _health(doms, s):
     """Attach the 0-100 health score to each domain (see health.py). Windows prefer the last 7 days, then 14, then
     lifetime; the fleet baseline for reply rate is the whole fleet's lifetime rates."""
     tot = store.q1("SELECT COALESCE(SUM(sent),0) sent, COALESCE(SUM(replied),0) replied, COALESCE(SUM(interested),0) i "
-                   "FROM inbox_senders")
+                   "FROM inbox_senders WHERE " + live_sql())
     fleet = {"reply_good_pct": s.get("inbox_reply_good_pct"), "reply_rate": tot["replied"] / tot["sent"] * 100 if tot["sent"] else None,
              "positive_rate": tot["i"] / tot["sent"] * 100 if tot["sent"] else None}
     cut = (dt.date.fromisoformat(today()) - dt.timedelta(days=40)).isoformat()
@@ -285,7 +315,7 @@ def overview():
     for d in store.q("SELECT domain, COUNT(*) mailboxes, SUM(status='Connected') connected, SUM(warmup) warmup, "
                      "SUM(sent) sent, SUM(bounced) bounced, SUM(replied) replied, SUM(interested) interested, "
                      "SUM(CASE WHEN status='Connected' THEN daily_limit ELSE 0 END) limit_sum, "
-                     "AVG(warmup_score) warmup_avg FROM inbox_senders GROUP BY domain"):
+                     "AVG(warmup_score) warmup_avg FROM inbox_senders WHERE " + live_sql() + " GROUP BY domain"):
         rate = round(d["bounced"] / d["sent"] * 100, 2) if d["sent"] >= s["inbox_min_sends"] else None
         o = ht.get(d["domain"], {})
         rr = round((d["replied"] or 0) / d["sent"] * 100, 2) if d["sent"] >= s["inbox_reply_min_sends"] else None
@@ -297,12 +327,12 @@ def overview():
     doms.sort(key=lambda x: (x["health"]["score"] is None, x["health"]["score"] if x["health"]["score"] is not None else 0,
                              x["reply_rate"] if x["reply_rate"] is not None else 0, x["domain"]))
     tot = store.q1("SELECT COUNT(*) n, COALESCE(SUM(sent),0) sent, COALESCE(SUM(bounced),0) bounced, "
-                   "COALESCE(SUM(status!='Connected'),0) disconnected FROM inbox_senders")
+                   "COALESCE(SUM(status!='Connected'),0) disconnected FROM inbox_senders WHERE " + live_sql())
     counts = {b: sum(1 for x in doms if x["band"] == b) for b in ("critical", "warn", "ok", "new")}
     reply_counts = {b: sum(1 for x in doms if x["reply_band"] == b) for b in ("critical", "warn", "ok", "new")}
-    tot_replied = store.q1("SELECT COALESCE(SUM(replied),0) r FROM inbox_senders")["r"]
+    tot_replied = store.q1("SELECT COALESCE(SUM(replied),0) r FROM inbox_senders WHERE " + live_sql())["r"]
     zones = {z: sum(1 for x in doms if x["health"]["zone"] == z) for z in ("healthy", "watch", "danger", "retire", "new")}
-    return {"domains": doms, "counts": counts, "zones": zones, "weights": {**health.DEFAULT_WEIGHTS, **(s.get("health_weights") or {})}, "mailboxes": tot["n"], "disconnected": tot["disconnected"],
+    return {"domains": doms, "counts": counts, "zones": zones, "canceled": canceled_summary(), "weights": {**health.DEFAULT_WEIGHTS, **(s.get("health_weights") or {})}, "mailboxes": tot["n"], "disconnected": tot["disconnected"],
             "sent": tot["sent"], "bounced": tot["bounced"],
             "rate": round(tot["bounced"] / tot["sent"] * 100, 2) if tot["sent"] else None,
             "reply_rate": round(tot_replied / tot["sent"] * 100, 2) if tot["sent"] else None, "reply_counts": reply_counts,

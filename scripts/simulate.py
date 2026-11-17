@@ -362,6 +362,16 @@ check(o["reply_rate"] is not None and o["reply_counts"] == {"critical": 1, "warn
 check(by["bad.com"]["ht_status"] == "NPC" and o["disconnected"] == 1, "Hypertide status joined; disconnected counted")
 check(alerts.due_alerts() == {}, "domain trouble raises no alerts: only the automation breaking does")
 
+# 15b. canceled domains (Hypertide's list) stay in Bison but are left out of every number
+check(len(inbox.canceled()) >= 43 and "victigweb.com" in inbox.canceled(), "Hypertide's list of 43 canceled domains is loaded")
+before = inbox.overview()
+store.kv_set("canceled_domains", ["bad.com"])
+o2 = inbox.overview()
+check("bad.com" not in {d["domain"] for d in o2["domains"]} and o2["mailboxes"] == before["mailboxes"] - 10 and o2["canceled"]["mailboxes"] == 10
+      and o2["canceled"]["domains"] == 1, "a canceled domain drops out of the table, the mailbox totals and the retire list")
+check(o2["reply_rate"] != before["reply_rate"] and o2["sent"] == before["sent"] - 2000, "and out of the fleet reply rate and send totals")
+store.kv_set("canceled_domains", [])
+
 # 16. daily snapshots give a trend: older day with a lower rate -> positive points, recent-sends rate
 old_day = (dt.date.fromisoformat(inbox.today()) - dt.timedelta(days=7)).isoformat()
 store.x("DELETE FROM inbox_history")

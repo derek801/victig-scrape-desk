@@ -5,6 +5,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY scripts/simulate.py ./scripts/simulate.py
-COPY data/counties.csv data/calibration.json data/pb_history.json ./data/
+COPY data/counties.csv data/calibration.json data/pb_history.json data/canceled_domains.txt ./data/
 # One worker on purpose: the scheduler is a thread of this process and SQLite lives on one disk.
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-10000} --workers 1 --proxy-headers --forwarded-allow-ips='*'"]
