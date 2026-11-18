@@ -294,6 +294,12 @@ def inbox_state(request: Request):
     return inbox.overview()
 
 
+@app.get("/api/inbox/trend")
+def inbox_trend(request: Request, days: int = 30):
+    need_user(request)
+    return inbox.daily_trend(max(7, min(days, 120)))
+
+
 @app.get("/api/rotation")
 def rotation_state(request: Request):
     need_user(request)

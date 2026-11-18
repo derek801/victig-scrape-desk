@@ -96,6 +96,11 @@ a{color:var(--blue)}
 </header>
 <main id="inboxMain" hidden>
   <div id="inboxBanners" style="display:grid;gap:8px"></div>
+  <section class="card">
+    <h2>Reply rate &amp; bounce rate by day <small id="trendNote"></small></h2>
+    <div id="trendChart" style="width:100%"></div>
+    <div id="trendSwaps" class="small" style="margin-top:6px"></div>
+  </section>
   <div class="kpis" id="inboxKpis"></div>
   <section class="card">
     <h2>Bench &amp; rotation <small id="rotNote"></small></h2>
@@ -268,7 +273,7 @@ async function clayReplace(id){const u=$("newClayUrl").value.trim();if(!u)return
 let TAB="desk", inboxData=null, inboxFilter="all";
 function showTab(t){TAB=t;document.body.classList.toggle("inboxtab",t==="inbox");$("deskMain").hidden=t!=="desk";$("inboxMain").hidden=t!=="inbox";
   $("tabDesk").classList.toggle("on",t==="desk");$("tabInbox").classList.toggle("on",t==="inbox");history.replaceState(null,"",t==="inbox"?"#inbox":location.pathname);if(t==="inbox")loadInbox()}
-async function loadInbox(){inboxData=await api("/api/inbox");renderInbox();try{renderRotation(await api("/api/rotation"))}catch(e){$("rotNote").textContent="could not load"}}
+async function loadInbox(){inboxData=await api("/api/inbox");renderInbox();try{renderTrend(await api("/api/inbox/trend"))}catch(e){$("trendNote").textContent="could not load"}try{renderRotation(await api("/api/rotation"))}catch(e){$("rotNote").textContent="could not load"}}
 async function benchOrder(){
   const out=$("rotTestOut"),btn=$("btnOrder");btn.disabled=true;
   try{
@@ -315,6 +320,28 @@ function renderRotation(r){
   const wasOpen=$("rotLog").querySelector("details")?.open;
   $("rotLog").innerHTML=groups.length?groups.slice(0,3).map(grp).join("")+(groups.length>3?`<details${wasOpen?" open":""}><summary class="muted" style="cursor:pointer;margin:4px 0">Older checks (${groups.length-3})</summary>${groups.slice(3).map(grp).join("")}</details>`:""):`<div class="muted">Nothing yet.</div>`;
 }
+function renderTrend(t){
+  const pts=t.days||[], W=Math.max(320,($("trendChart").parentElement.clientWidth||840)-40), H=230, pl=40, pr=12, pt=14, pb=26;
+  if(!pts.length){$("trendChart").innerHTML=`<div class="muted">Nothing to draw yet: the daily numbers build up from each day's sync.</div>`;$("trendSwaps").innerHTML="";return}
+  const days=[], last=new Date(pts[pts.length-1].day+"T12:00:00"), first=new Date(pts[0].day+"T12:00:00");
+  for(let d=new Date(first);d<=last;d.setDate(d.getDate()+1))days.push(d.toISOString().slice(0,10));
+  (t.swaps||[]).forEach(w=>{if(!days.includes(w.day)&&w.day>=days[0]&&w.day<=days[days.length-1])days.push(w.day)});days.sort();
+  const idx=d=>days.indexOf(d), x=d=>pl+(days.length<2?0:idx(d)/(days.length-1)*(W-pl-pr));
+  const vals=pts.flatMap(p=>[p.reply_pct,p.bounce_pct]).filter(v=>v!=null).concat([t.reply_good_pct||0]);
+  const mx=Math.max(1,Math.ceil(Math.max(...vals)*1.15*2)/2), y=v=>H-pb-(v/mx)*(H-pb-pt);
+  let svg=`<svg width="${W}" height="${H}" role="img" aria-label="reply rate and bounce rate by day">`;
+  const step=mx<=2?0.5:mx<=5?1:2;
+  for(let v=0;v<=mx+1e-9;v+=step)svg+=`<line x1="${pl}" x2="${W-pr}" y1="${y(v)}" y2="${y(v)}" stroke="#eef0f5"/><text x="${pl-6}" y="${y(v)+4}" text-anchor="end" font-size="10.5" fill="#667085">${v}%</text>`;
+  if(t.reply_good_pct)svg+=`<line x1="${pl}" x2="${W-pr}" y1="${y(t.reply_good_pct)}" y2="${y(t.reply_good_pct)}" stroke="var(--green)" stroke-dasharray="4 4" opacity=".6"><title>Reply-rate goal: ${t.reply_good_pct}%</title></line>`;
+  days.forEach((d,i)=>{if(i%Math.ceil(days.length/8)===0||i===days.length-1)svg+=`<text x="${x(d)}" y="${H-8}" text-anchor="middle" font-size="10.5" fill="#667085">${d.slice(5).replace("-","/")}</text>`});
+  (t.swaps||[]).forEach(w=>{if(idx(w.day)<0)return;const tip=w.moves.map(m=>`out ${m.out} → in ${m.in||"?"}`).join("\n");
+    svg+=`<line x1="${x(w.day)}" x2="${x(w.day)}" y1="${pt}" y2="${H-pb}" stroke="#7c3aed" stroke-dasharray="3 3"/><g><title>${esc(w.day+"\n"+tip)}</title><rect x="${x(w.day)-14}" y="0" width="28" height="14" rx="7" fill="#7c3aed"/><text x="${x(w.day)}" y="10.5" text-anchor="middle" font-size="9.5" fill="#fff" font-weight="700">⇄ ${w.moves.length}</text></g>`});
+  for(const [k,col] of [["reply_pct","var(--green)"],["bounce_pct","var(--red)"]]){
+    const seg=pts.filter(p=>p[k]!=null);if(!seg.length)continue;
+    svg+=`<polyline fill="none" stroke="${col}" stroke-width="2" points="${seg.map(p=>x(p.day).toFixed(1)+","+y(p[k]).toFixed(1)).join(" ")}"/>`+seg.map(p=>`<circle cx="${x(p.day)}" cy="${y(p[k])}" r="3" fill="${col}"><title>${p.day}: ${k==="reply_pct"?"reply":"bounce"} ${p[k]}% (${fmt(k==="reply_pct"?p.replied:p.bounced)} of ${fmt(p.sent)} sent)</title></circle>`).join("")}
+  $("trendChart").innerHTML=svg+`</svg><div class="legend"><span><span class="dot" style="background:var(--green)"></span>Reply rate</span><span><span class="dot" style="background:var(--red)"></span>Bounce rate</span>${t.reply_good_pct?`<span>dashed = ${t.reply_good_pct}% reply goal</span>`:""}<span><span class="dot" style="background:#7c3aed"></span>⇄ domains swapped out/in that day</span></div>`;
+  $("trendNote").textContent=`each day's growth in sends, replies and bounces across live domains · days under ${t.min_sends} sends left off`;
+  $("trendSwaps").innerHTML=(t.swaps||[]).length?"<b>Swaps:</b> "+t.swaps.slice().reverse().map(w=>w.moves.map(m=>`${w.day.slice(5).replace("-","/")}: <span class="muted">out</span> ${esc(m.out)} <span class="muted">→ in</span> ${esc(m.in||"?")}`).join("; ")).join("; "):`<span class="muted">No domains swapped yet (rotation is still in dry-run mode).</span>`}
 async function inboxSync(){await api("/api/inbox/sync",{});$("inboxNote").textContent="syncing… (takes a couple of minutes)";setTimeout(loadInbox,20000)}
 function spark(v){if(!v||v.length<2)return "";const w=64,h=18,lo=Math.min(...v),hi=Math.max(...v),r=hi-lo||1;
   const pts=v.map((y,i)=>`${(i/(v.length-1)*w).toFixed(1)},${(h-2-(y-lo)/r*(h-4)).toFixed(1)}`).join(" ");
