@@ -670,4 +670,23 @@ check(any("scheduler" in t for t in desk.api_check(req("t0ken"))["problems"]), "
 store.kv_set("heartbeat", store.iso())
 store.kv_set("inbox_sync", {"at": (store.now() - dt.timedelta(hours=20)).isoformat(timespec="seconds")})
 check(any("Inbox Health" in t for t in desk.api_check(req("t0ken"))["problems"]), "a stale Bison sync is a problem")
+
+# ---- daily reply/bounce trend and swap tags ----
+store.x("DELETE FROM inbox_history"); store.x("DELETE FROM rotation_log")
+_d0 = dt.date.fromisoformat(inbox.today())
+def _day(n): return (_d0 - dt.timedelta(days=n)).isoformat()
+store.xmany("INSERT INTO inbox_history(day,domain,sent,bounced,mailboxes,connected,replied,interested) VALUES(?,?,?,?,?,?,?,?)",
+            [(_day(3), "a.com", 1000, 20, 5, 5, 10, 1), (_day(2), "a.com", 1500, 35, 5, 5, 20, 2), (_day(1), "a.com", 1520, 36, 5, 5, 21, 2),
+             (_day(3), "b.com", 1000, 10, 5, 5, 5, 0), (_day(2), "b.com", 1500, 30, 5, 5, 10, 0), (_day(0), "b.com", 100, 0, 5, 5, 0, 0)])
+tr = inbox.daily_trend(30)
+dd = {r["day"]: r for r in tr["days"]}
+check(dd[_day(2)]["sent"] == 1000 and dd[_day(2)]["replied"] == 15 and dd[_day(2)]["reply_pct"] == 1.5 and dd[_day(2)]["bounce_pct"] == 3.5,
+      "daily trend sums each domain's growth in sends, replies and bounces")
+check(dd[_day(1)]["reply_pct"] is None, "a day with under 50 sends is left off the line")
+check(_day(3) not in dd and _day(0) not in dd, "a first snapshot and a counter that went backwards add nothing")
+check(tr["swaps"] == [], "no live swaps yet, no tags")
+rotation.log("r1", "dry", "swap", "a.com", True, {"out": "a.com", "in": "z.com"})
+rotation.log("r2", "live", "swap", "a.com", True, {"out": "a.com", "in": "z.com", "campaigns": 2})
+sw = inbox.daily_trend(30)["swaps"]
+check(len(sw) == 1 and sw[0]["moves"] == [{"out": "a.com", "in": "z.com"}], "only live swaps are tagged, with who went out and who came in")
 print("all checks passed")

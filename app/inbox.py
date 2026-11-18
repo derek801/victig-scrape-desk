@@ -8,6 +8,7 @@ Lifetime rate = bounced / sent, added up over every mailbox on a domain, judged 
 `inbox_min_sends` sends. Bison's own bands: under 2% fine, 2-3% warning, 3%+ critical. Whole domains are judged,
 not single mailboxes, because Hypertide replaces by domain and one mailbox's few sends are too noisy."""
 import datetime as dt
+import json
 import re
 import threading
 import time
@@ -257,6 +258,58 @@ def _trends(doms, s):
             d["trend"] = {"pp": round(d["rate"] - o["bounced"] / o["sent"] * 100, 2), "days": days}
             if d["sent"] - o["sent"] >= 50:
                 d["recent_rate"] = round((d["bounced"] - o["bounced"]) / (d["sent"] - o["sent"]) * 100, 2)
+
+
+def _local_day(ts):
+    """Log timestamps are UTC ISO strings; the page works in the desk's own time zone."""
+    try:
+        t = dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=dt.timezone.utc)
+        return t.astimezone(ZoneInfo(config.TZ)).date().isoformat()
+    except ValueError:
+        return str(ts)[:10]
+
+
+TREND_MIN_SENDS = 50        # a day with fewer sends than this is left off the line (too noisy to mean anything)
+
+
+def daily_trend(days=30):
+    """Fleet reply rate and bounce rate for each day, plus the days domains were swapped in or out.
+    Each day's numbers are that day's growth in the lifetime counters, summed over the live domains (a domain's first
+    snapshot, a counter that went backwards, or a snapshot from before replies were stored contributes nothing)."""
+    start = (dt.date.fromisoformat(today()) - dt.timedelta(days=days)).isoformat()
+    by_dom = {}
+    for r in store.q("SELECT day, domain, sent, bounced, replied FROM inbox_history WHERE day>=? AND " + live_sql() +
+                     " ORDER BY day", ((dt.date.fromisoformat(today()) - dt.timedelta(days=days + 7)).isoformat(),)):
+        by_dom.setdefault(r["domain"], []).append(r)
+    agg = {}
+    for rows in by_dom.values():
+        for a, b in zip(rows, rows[1:]):
+            if b["day"] < start or a["replied"] is None or b["replied"] is None:
+                continue
+            ds, db, dr = b["sent"] - a["sent"], b["bounced"] - a["bounced"], b["replied"] - a["replied"]
+            if min(ds, db, dr) < 0:
+                continue
+            t = agg.setdefault(b["day"], [0, 0, 0])
+            t[0] += ds; t[1] += db; t[2] += dr
+    out = []
+    for day in sorted(agg):
+        sent, bounced, replied = agg[day]
+        out.append({"day": day, "sent": sent, "bounced": bounced, "replied": replied,
+                    "reply_pct": round(replied / sent * 100, 2) if sent >= TREND_MIN_SENDS else None,
+                    "bounce_pct": round(bounced / sent * 100, 2) if sent >= TREND_MIN_SENDS else None})
+    swaps = {}
+    for r in store.q("SELECT ts, domain, detail FROM rotation_log WHERE step='swap' AND mode='live' AND ok=1 AND ts>=? ORDER BY ts",
+                     (start,)):
+        try:
+            d = json.loads(r["detail"] or "{}")
+        except ValueError:
+            d = {}
+        swaps.setdefault(_local_day(r["ts"]), []).append(
+            {"out": d.get("out") or r["domain"], "in": d.get("in")})
+    return {"days": out, "swaps": [{"day": k, "moves": v} for k, v in sorted(swaps.items())],
+            "reply_good_pct": store.settings().get("inbox_reply_good_pct"), "min_sends": TREND_MIN_SENDS}
 
 
 # ---- reading -------------------------------------------------------------------------------------
