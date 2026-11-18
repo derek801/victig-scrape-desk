@@ -305,9 +305,22 @@ async function rotTest(kind){
   }catch(e){out.innerHTML=`<div class="banner red">${esc(typeof e==="string"?e:e.detail||e.message||e.error||JSON.stringify(e))}</div>`}
   btn.disabled=false;
 }
-function renderRotation(r){
+// Banners on this tab can be hidden. A hidden banner stays hidden while its wording is the same apart from the numbers; a new or different problem shows up again.
+let rotData=null;
+const bannerKey=t=>String(t).replace(/\d[\d,.]*/g,"#").slice(0,160);
+function hiddenBanners(){try{return JSON.parse(localStorage.getItem("hiddenBanners")||"{}")}catch(e){return {}}}
+function hideBanner(i){const k=window._bk[i];const h=hiddenBanners();h[k]=1;try{localStorage.setItem("hiddenBanners",JSON.stringify(h))}catch(e){}refreshBanners()}
+function showHiddenBanners(){try{localStorage.removeItem("hiddenBanners")}catch(e){}refreshBanners()}
+function refreshBanners(){if(inboxData)renderInbox();if(rotData)renderRotation(rotData)}
+function hideable(items){ // items: [[cls,text,html?,style?]] -> {html, hidden}
+  window._bk=window._bk||[];const h=hiddenBanners();let n=0,out=[];
+  for(const [cls,text,html,style] of items){const k=bannerKey(text);if(h[k]){n++;continue}
+    window._bk.push(k);out.push(`<div class="banner ${cls}" style="${style||""};display:flex;gap:10px;align-items:flex-start;justify-content:space-between"><span>${html||esc(text)}</span><button onclick="hideBanner(${window._bk.length-1})" style="padding:2px 8px;font-size:12px;white-space:nowrap">Hide</button></div>`)}
+  return {html:out.join(""),hidden:n}}
+const hiddenLink=n=>n?`<div class="muted small"><a href="#" onclick="showHiddenBanners();return false">${n} hidden notice${n>1?"s":""}: show</a></div>`:"";
+function renderRotation(r){rotData=r;
   const mode={off:"Off",dry:"Dry run: plans and logs, changes nothing",live:"Live: swaps for real"}[r.mode]||r.mode,hb=r.heartbeat||{};
-  $("rotNotices").innerHTML=(r.notices||[]).map(t=>`<div class="banner amber" style="margin-bottom:6px">${esc(t)}</div>`).join("");
+  const rn=hideable((r.notices||[]).map(t=>["amber",t,null,"margin-bottom:6px"]));$("rotNotices").innerHTML=rn.html+hiddenLink(rn.hidden);
   $("rotNote").textContent=mode+(r.error&&(r.candidates||[]).length?" · "+r.error:"");
   $("rotKpis").innerHTML=[[`${r.ready} / ${r.target}`,"Bench domains ready"],[fmt(r.short_by),"Short of target"],[`${r.swaps_today} / ${r.daily_cap}`,"Live swaps today / daily cap"],[fmt(hb.swaps_live),"Swaps, last 7 days"],[fmt(hb.swaps_planned_dry),"Would-be swaps (dry), 7 days"],[`${fmt(hb.errors)} / ${fmt(hb.errors_recovered)}`,"Errors / recovered, 7 days"]]
     .map(([v,l],i)=>`<div class="kpi"><div class="v" style="${i===1&&r.short_by?"color:var(--amber)":""}">${v}</div><div class="l">${l}</div></div>`).join("");
@@ -352,15 +365,14 @@ function trendCell(x){const t=x.trend;if(!t)return `<span class="muted small">bu
   return `<span title="${esc(tip)}" style="color:${col};white-space:nowrap">${spark(x.spark)} ${arrow} ${t.pp>0?"+":""}${t.pp}</span>`}
 function renderInbox(){
   const d=inboxData;if(!d)return;
-  const b=[];
-  if(!d.configured)b.push(`<div class="banner amber">No Bison key yet (BISON_KEY_VICTIG), so there is nothing to read.</div>`);
-  if(d.sync&&d.sync.error)b.push(`<div class="banner red">The last sync failed: ${esc(d.sync.error)}</div>`);
-  (d.alerts||[]).forEach(t=>b.push(`<div class="banner red">${esc(t)}</div>`));
-  $("inboxBanners").innerHTML=b.join("");
+  const b=[],ago0=d.sync&&d.sync.at?ago(d.sync.at):"not yet";
+  if(!d.configured)b.push(["amber","No Bison key yet (BISON_KEY_VICTIG), so there is nothing to read."]);
+  if(d.sync&&d.sync.error)b.push(["red",`The last sync failed: ${d.sync.error}`]);
+  (d.alerts||[]).forEach(t=>b.push(["red",t]));
   const c=d.counts;
   const rc=d.reply_counts||{};
-  if(d.canceled)b.push(`<div class="banner amber" style="font-weight:400">${fmt(d.canceled.domains)} domains Hypertide has canceled still have ${fmt(d.canceled.mailboxes)} mailboxes listed in Bison (${fmt(d.canceled.not_connected)} not connected, ${fmt(d.canceled.still_connected)} still showing connected). They are left out of every number on this page. Removing them from Bison is a person's job.</div>`);
-  $("inboxBanners").innerHTML=b.join("");
+  if(d.canceled){const k=d.canceled;b.push(["amber",`Hypertide canceled ${fmt(k.domains)} domains that still have ${fmt(k.mailboxes)} mailboxes in Bison (${fmt(k.not_connected)} not connected, ${fmt(k.still_connected)} showing connected), as of the last sync ${ago0}. They are left out of every number on this page. Mailboxes deleted in Bison since then drop off at the next sync.`])}
+  const hb=hideable(b);$("inboxBanners").innerHTML=hb.html+hiddenLink(hb.hidden);
   const z=d.zones||{};
   $("inboxKpis").innerHTML=[[fmt(d.domains.length),"Sending domains"],[fmt(z.healthy||0),"Healthy (75+)"],[fmt(z.watch||0),"Watch (55-74)"],[fmt(z.danger||0),"Danger (35-54)"],[fmt(z.retire||0),"Retire (under 35 or hard-fail)"],[d.reply_rate==null?"–":d.reply_rate+"%","Reply rate overall (lifetime)"],[fmt(d.disconnected),`Mailboxes not connected of ${fmt(d.mailboxes)}`]]
     .map(([v,l],i)=>`<div class="kpi"><div class="v" style="${i===4&&z.retire?"color:var(--red)":i===3&&z.danger?"color:var(--amber)":""}">${v}</div><div class="l">${l}</div></div>`).join("");
