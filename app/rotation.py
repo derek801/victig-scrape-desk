@@ -2,14 +2,17 @@
 retired one off its campaigns, and note that the bench needs refilling.
 
 Modes (setting `rotation_mode`):  off | dry (default: plans and logs, changes nothing) | live (really calls Bison).
-Guardrails: a daily swap cap, a mass-retire stop (many domains failing at once usually means a bad list or bad copy,
-not burnt domains, so nothing is swapped and the team is told), the replacement must be warm AND have healthy DNS
+Guardrails: a daily swap cap and a per-pass limit (when more domains are in Retire than that, the worst ones are replaced
+first and the rest wait, with a note on the page), the replacement must be warm AND have healthy DNS
 (re-checked at swap time), the new mailboxes go onto each campaign BEFORE the old ones come off (no gap, leads stay
 with the campaign), and every step is written to `rotation_log`.
 
-What stays with a person (shown on the page and in the weekly heartbeat): buying new bench domains (the Hypertide
-quote/checkout schema is not verified, so no money moves here), cancelling or decommissioning a retired Hypertide
-subscription, registrar nameserver changes for domains Hypertide does not manage.
+Retired domains go to Hypertide's Backup Pool to recover (`pool_step`): cancel the subscription for that domain, then add
+the cancelled order to the pool, retrying each pass until Hypertide accepts it; after POOL_GIVE_UP failed passes it raises
+one alert for that domain so a person can step in. Only live mode does this.
+
+What stays with a person (shown on the page and in the weekly heartbeat): buying new bench domains unless bench_autobuy is
+on, registrar nameserver changes for domains Hypertide does not manage.
 
 The executors (`Bison`, `Hypertide`) are small classes so tests can swap in fakes; this module never talks to Chat."""
 import datetime as dt
@@ -21,12 +24,14 @@ import requests
 from . import alerts, config, inbox, ordering, store
 
 NEEDS_PERSON = ["Buy new bench domains: the desk can order them, but only when bench_autobuy is switched on and rotation is live "
-                "(until then a person orders them in Hypertide)", "Cancel or decommission a retired domain's Hypertide subscription",
-                "Registrar nameserver changes for domains Hypertide does not manage"]
+                "(until then a person orders them in Hypertide)", "Registrar nameserver changes for domains Hypertide does not manage"]
 WARM_MIN = 85                      # average Bison warm-up score a replacement's mailboxes need
 ERR_KEY = "inbox:rotation:error"
 MASS_KEY = "inbox:rotation:mass"
 EMPTY_KEY = "inbox:rotation:bench-empty"
+POOL_KEY = "inbox:rotation:pool:"        # + domain: alert when a domain cannot be put in the Backup Pool
+POOL_GIVE_UP = 6                         # failed passes in a row before a person is asked
+HAPI = "https://backend.hypertide.io/api/v1"
 
 
 # ---- executors -----------------------------------------------------------------------------------
@@ -54,8 +59,40 @@ class Bison:
     def attach(self, cid, ids):
         self._post(cid, "attach-sender-emails", ids)
 
+    def _try(self, methods, path, **kw):
+        """Bison's own docs disagree about some methods (DELETE in the text, POST in the examples): try each in turn."""
+        r = None
+        for m in methods:
+            r = requests.request(m, f"{self.base}{path}", headers=self.h, timeout=40, **kw)
+            if r.status_code not in (404, 405):
+                break
+        return r
+
+    def status(self, cid):
+        r = requests.get(f"{self.base}/api/campaigns/{cid}", headers=self.h, timeout=40)
+        r.raise_for_status()
+        return str((r.json().get("data") or {}).get("status") or "").lower()
+
     def remove(self, cid, ids):
-        self._post(cid, "remove-sender-emails", ids)
+        """Take mailboxes off a campaign. Bison only allows that on a draft or paused campaign, so an active one is paused
+        for the moment this takes and put back (the resume runs even if the removal fails). Returns a note for the audit log."""
+        body = {"sender_email_ids": ids}
+        r = self._try(("DELETE", "POST"), f"/api/campaigns/{cid}/remove-sender-emails", json=body)
+        if r.status_code < 300:
+            return "removed"
+        if r.status_code != 422 or "draft or paused" not in r.text:
+            r.raise_for_status()
+        was = self.status(cid)
+        if was not in ("active", "running", "launching"):
+            r.raise_for_status()
+        p = self._try(("PATCH", "POST"), f"/api/campaigns/{cid}/pause")
+        p.raise_for_status()
+        try:
+            r = self._try(("DELETE", "POST"), f"/api/campaigns/{cid}/remove-sender-emails", json=body)
+            r.raise_for_status()
+        finally:
+            self._try(("PATCH", "POST"), f"/api/campaigns/{cid}/resume")
+        return "campaign was active: paused, removed, resumed"
 
 
 class Hypertide:
@@ -81,6 +118,48 @@ class Hypertide:
                 return out
             after = j.get("nextCursor")
             time.sleep(2)
+
+    # ---- Backup Pool: retire a domain (cancel its subscription, then add the cancelled order to the pool) ----
+    def _call(self, method, path, body=None, params=None):
+        """-> (status_code, json). Retries 429/5xx a few times. Never raises on HTTP errors, so callers can read the answer."""
+        for attempt in range(4):
+            r = requests.request(method, HAPI + path, json=body, params=params, timeout=90,
+                                 headers={"X-API-Key": config.HYPERTIDE_API_KEY, "Content-Type": "application/json"})
+            if r.status_code in (429, 502, 503, 504) and attempt < 3:
+                time.sleep(3 * 2 ** attempt)
+                continue
+            break
+        try:
+            j = r.json()
+        except Exception:
+            j = {"raw": r.text[:300]}
+        return r.status_code, (j if isinstance(j, dict) else {"raw": j})
+
+    def classify(self, domain):
+        """Where a domain stands: {state: active_order | cancelled_order | in_pool | other, order_id, raw}. Read-only."""
+        code, j = self._call("POST", "/warmup-domain-pool/external/classify", {"domains": [domain]})
+        res = (j.get("results") or [{}])[0] if code == 200 else {}
+        c = res.get("classification") or ""
+        state = {"active_order": "active_order", "cancelled_order": "cancelled_order"}.get(c, "in_pool" if "pool" in c else "other")
+        return {"state": state, "order_id": res.get("orderRecordId"), "raw": res if res else {"http": code, "body": str(j)[:200]}}
+
+    def order_of(self, domain):
+        """(order id, subscription id) from Hypertide's active orders, or (None, None)."""
+        for o in ordering.active_orders():
+            if (o.get("domain") or "").lower() == domain:
+                return o.get("id"), o.get("subscriptionId")
+        return None, None
+
+    def cancel(self, order_id, subscription_id):
+        """Cancel one domain's order inside its subscription (a partial cancellation). -> (ok, note)."""
+        code, j = self._call("POST", "/subscriptions/cancel", {"subscriptionId": subscription_id, "isPartialProductCancellation": True,
+                                                              "domainRecordIds": [order_id]})
+        return code == 200 and j.get("success", True) is not False, f"{code} {str(j.get('message') or j.get('error') or j)[:160]}"
+
+    def add_to_pool(self, order_id):
+        """Opt a cancelled order into the Backup Pool. -> (ok, note). 201 = added, 200 = already in the pool."""
+        code, j = self._call("POST", "/warmup-domain-pool", {"orderRecordId": order_id})
+        return code in (200, 201) and j.get("success", True) is not False, f"{code} {str(j.get('message') or j.get('data') or j)[:160]}"
 
 
 def notice(key, text=None):
@@ -198,16 +277,12 @@ def run_cycle(bison=None, hyper=None, force_dry=False):
                   and life.get(d["domain"], {}).get("state") not in ("resting", "decommissioned")]
         result["retire"] = [d["domain"] for d in retire]
         result["mass_limit"] = s["rotation_mass_limit"]
-        if len(retire) > s["rotation_mass_limit"]:
-            notice(MASS_KEY, f"{len(retire)} domains hit Retire at once, so rotation stopped (that pattern usually means a bad "
-                   "list or bad copy, not burnt domains). Nothing was swapped.")
-            log(run, mode, "mass_stop", None, False, {"retire": len(retire), "limit": s["rotation_mass_limit"]})
-            result["skipped"] = "mass"
-            return result
         notice(MASS_KEY)
         allb = bench(hyper, fresh_dns=bool(retire))
         b = [x for x in allb if x["ready"]]
         store.kv_set("bench_ready", {"n": len(b), "at": store.iso()})
+        hyper = hyper or Hypertide()
+        pool_step(run, live, hyper)                      # carry on with domains already on their way to the Backup Pool
         if not retire:
             notice(EMPTY_KEY)
             if len(b) < s["bench_target"]:
@@ -221,7 +296,12 @@ def run_cycle(bison=None, hyper=None, force_dry=False):
             _finish_ok(run, mode)
             return result
         bison = bison or Bison()
-        for d in sorted(retire, key=lambda x: x["health"]["score"] if x["health"]["score"] is not None else 0)[:room]:
+        batch = min(room, s["rotation_mass_limit"]) if s["rotation_mass_limit"] > 0 else room
+        worst = sorted(retire, key=lambda x: x["health"]["score"] if x["health"]["score"] is not None else 0)
+        if len(worst) > batch:
+            notice(MASS_KEY, f"{len(worst)} domains are in Retire. The worst {batch} are being replaced now; the rest wait for their turn "
+                   "(the limit per pass, today's swap limit and the bench).")
+        for d in worst[:batch]:
             if not b:
                 notice(EMPTY_KEY, f"{d['domain']} needs replacing but the bench has no ready domain. Order more bench domains.")
                 log(run, mode, "bench_empty", d["domain"], False, {})
@@ -229,7 +309,9 @@ def run_cycle(bison=None, hyper=None, force_dry=False):
                 break
             notice(EMPTY_KEY)
             repl = b.pop(0)
-            result["swaps"].append(_swap(run, live, bison, d, repl, life))
+            result["swaps"].append(_swap(run, live, bison, d, repl, life, hyper))
+        if result["swaps"] and live:
+            pool_step(run, live, hyper, only={w["out"] for w in result["swaps"]})
         left = len(b)
         if left < s["bench_target"]:
             log(run, mode, "refill_needed", None, True, {"ready_left": left, "target": s["bench_target"]})
@@ -243,13 +325,94 @@ def run_cycle(bison=None, hyper=None, force_dry=False):
     return result
 
 
+# ---- Backup Pool step ----------------------------------------------------------------------------
+
+def _pool_fail(run, mode, domain, q, why):
+    q["tries"] = q.get("tries", 0) + 1
+    q["note"] = why[:200]
+    log(run, mode, "pool", domain, False, {"state": q.get("state"), "try": q["tries"], "why": why[:200]})
+    if q["tries"] >= POOL_GIVE_UP:
+        alerts.raise_alert(POOL_KEY + domain, f"{domain} could not be put in Hypertide's Backup Pool after {q['tries']} tries: {why[:120]}",
+                           grace_min=0, remind_h=24, link="/#inbox")
+
+
+def pool_step(run, live, hyper, only=None):
+    """Move retired domains toward the Backup Pool. Each pass does the next safe step per domain and remembers where it got to
+    (kv `pool_queue`), so a pass that stops halfway just continues on the next one.
+      active_order    -> cancel the subscription (partial, this domain only)           -> state `cancelling`
+      cancelled_order -> add the order to the pool                                      -> state `in_pool`
+      in_pool         -> done
+    Hypertide may only accept the pool add after the billing period ends, so a refused add is simply retried next pass.
+    Dry mode only reads (classify) and logs what it would do. Never raises."""
+    mode = "live" if live else "dry"
+    queue = store.kv_get("pool_queue") or {}
+    todo = [d for d, q in queue.items() if q.get("state") != "in_pool" and (only is None or d in only)]
+    done = []
+    for domain in todo:
+        q = queue[domain]
+        try:
+            c = hyper.classify(domain)
+            st = c["state"]
+            if st == "in_pool":
+                q.update(state="in_pool", tries=0, note="in the Backup Pool")
+                alerts.clear(POOL_KEY + domain, "in the Backup Pool")
+                log(run, mode, "pool", domain, True, {"state": "in_pool"})
+                done.append(domain)
+                continue
+            if st == "active_order":
+                oid, sid = hyper.order_of(domain)
+                if not (oid and sid):
+                    _pool_fail(run, mode, domain, q, "Hypertide has no active order with a subscription for this domain")
+                    continue
+                if not live:
+                    log(run, mode, "pool", domain, True, {"would": "cancel subscription, then add to Backup Pool", "order": oid})
+                    continue
+                ok, note = hyper.cancel(oid, sid)
+                if not ok:
+                    _pool_fail(run, mode, domain, q, "cancel refused: " + note)
+                    continue
+                q.update(state="cancelling", order_id=oid, tries=0, note="cancel requested")
+                log(run, mode, "pool_cancel", domain, True, {"order": oid, "note": note})
+                st, c["order_id"] = "cancelled_order", oid           # try the add straight away; if Hypertide wants to wait, next pass
+            if st == "cancelled_order":
+                oid = c.get("order_id") or q.get("order_id")
+                if not live:
+                    log(run, mode, "pool", domain, True, {"would": "add the cancelled order to the Backup Pool", "order": oid})
+                    continue
+                ok, note = hyper.add_to_pool(oid)
+                if ok:
+                    q.update(state="in_pool", order_id=oid, tries=0, note="in the Backup Pool")
+                    alerts.clear(POOL_KEY + domain, "in the Backup Pool")
+                    log(run, mode, "pool_add", domain, True, {"order": oid, "note": note})
+                    done.append(domain)
+                elif q.get("state") == "cancelling" and q.get("tries", 0) == 0 and "409" in note:
+                    q["note"] = "cancelled, waiting for Hypertide to accept the pool add"   # normal while the billing period runs
+                    q["tries"] = 1
+                    log(run, mode, "pool", domain, True, {"waiting": note})
+                else:
+                    _pool_fail(run, mode, domain, q, "pool add refused: " + note)
+                continue
+            _pool_fail(run, mode, domain, q, f"Hypertide does not list this as an order it can cancel or add ({c['raw']})")
+        except Exception as e:
+            _pool_fail(run, mode, domain, q, "error: " + str(e)[:150])
+    if live:
+        store.kv_set("pool_queue", queue)
+    return done
+
+
+def enqueue_pool(domain):
+    q = store.kv_get("pool_queue") or {}
+    q.setdefault(domain, {"state": "queued", "tries": 0, "since": store.iso()})
+    store.kv_set("pool_queue", q)
+
+
 def _finish_ok(run, mode):
     if ERR_KEY in alerts.open_alerts():
         alerts.clear(ERR_KEY, "Domain rotation recovered")
         log(run, mode, "recovered", None, True, {})
 
 
-def _swap(run, live, bison, d, repl, life):
+def _swap(run, live, bison, d, repl, life, hyper=None):
     """Attach the replacement's mailboxes to every campaign the retiring domain's mailboxes are on, then take the old
     ones off. Dry mode does the reads (campaign lookup) but none of the writes."""
     mode = "live" if live else "dry"
@@ -271,11 +434,14 @@ def _swap(run, live, bison, d, repl, life):
             bison.attach(p["campaign"], p["attach"])
             log(run, mode, "attach", d["domain"], True, {"campaign": p["campaign"], "ids": p["attach"]})
         for p in plan:
-            bison.remove(p["campaign"], p["remove"])
-            log(run, mode, "remove", d["domain"], True, {"campaign": p["campaign"], "ids": p["remove"]})
+            note = bison.remove(p["campaign"], p["remove"])
+            log(run, mode, "remove", d["domain"], True, {"campaign": p["campaign"], "ids": p["remove"], "note": note})
         life[d["domain"]] = {"state": "resting", "since": store.iso(), "replaced_by": repl["domain"]}
         life[repl["domain"]] = {"state": "active", "since": store.iso()}
         store.kv_set("domain_lifecycle", life)
+        enqueue_pool(d["domain"])                       # a failure after this point never undoes the swap
+    if not live:
+        log(run, mode, "pool", d["domain"], True, {"would": "after the swap: cancel this domain's subscription and add it to the Backup Pool"})
     log(run, mode, "swap", d["domain"], True, {"out": d["domain"], "in": repl["domain"], "campaigns": len(plan),
                                               "note": "no changes made (dry run)" if not live else "done"})
     return {"out": d["domain"], "in": repl["domain"], "campaigns": len(plan), "mode": mode}

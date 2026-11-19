@@ -426,6 +426,7 @@ class FakeBison:
 
     def remove(self, cid, ids):
         self.calls.append(("remove", cid, list(ids)))
+        return "removed"
 
 
 class FakeHyper:
@@ -434,6 +435,28 @@ class FakeHyper:
 
     def pool(self):
         return self.rows
+
+    # Backup Pool retire flow: scripted so tests can make Hypertide accept, wait or refuse
+    state = "active_order"
+    add_answers = None
+    cancels = 0
+
+    def classify(self, domain):
+        return {"state": self.state, "order_id": "rec" + domain, "raw": {}}
+
+    def order_of(self, domain):
+        return "rec" + domain, "sub_1"
+
+    def cancel(self, oid, sid):
+        self.cancels += 1
+        self.state = "cancelled_order"
+        return True, "200 ok"
+
+    def add_to_pool(self, oid):
+        a = (self.add_answers or [(True, "201 added")]).pop(0)
+        if a[0]:
+            self.state = "in_pool"
+        return a
 
 
 store.x("DELETE FROM inbox_history")
@@ -510,13 +533,20 @@ check(r["skipped"] == "bench-empty" and "no ready domain" in " ".join(rotation.b
 inbox.fetch_dns = lambda d: {"spf": False, "dmarc": True, "mx": True, "dkim": True}
 check(rotation.bench(hyper, fresh_dns=True)[0]["ready"] is False, "replacement with broken DNS is not used")
 inbox.fetch_dns = lambda d: dict(dns_ok)
-# mass event -> stop and tell the team
-store.save_settings({"rotation_mass_limit": 0})
+# many Retire domains -> the worst ones are replaced first, the rest wait, and it is only a page notice
+_real_overview, _real_bench = inbox.overview, rotation.bench
+def _dom(name, score):
+    return {"domain": name, "health": {"zone": "retire", "score": score, "hard_fail": [], "drag": None}}
+inbox.overview = lambda: {"domains": [_dom("w1.com", 30), _dom("w2.com", 10), _dom("w3.com", 20), _dom("w4.com", 5)]}
+rotation.bench = lambda hyper, fresh_dns=False: [{"domain": f"bench{i}.com", "ready": True, "sender_ids": [900 + i], "source": "ordered"} for i in range(6)]
+store.save_settings({"rotation_mass_limit": 2, "rotation_daily_cap": 5})
 store.kv_set("domain_lifecycle", {})
-r = rotation.run_cycle(bison, hyper)
-check(r["skipped"] == "mass" and len(r["retire"]) >= 1 and r["mass_limit"] == 0 and any("at once" in t for t in rotation.bench_status(FakeHyper([]))["notices"])
-      and alerts.due_alerts() == {}, "more Retire domains than the limit: stop, show a page notice, no alert for the 10am check")
-store.save_settings({"rotation_mass_limit": 3})
+r = rotation.run_cycle(bison, hyper, force_dry=True)
+check([x["out"] for x in r["swaps"]] == ["w4.com", "w2.com"] and r["skipped"] is None
+      and any("worst 2" in t for t in rotation.bench_status(FakeHyper([]))["notices"]) and alerts.due_alerts() == {},
+      "4 domains in Retire, limit 2: the worst 2 are replaced, the rest wait, a page notice and no alert")
+inbox.overview, rotation.bench = _real_overview, _real_bench
+store.save_settings({"rotation_mass_limit": 3, "rotation_daily_cap": 1})
 # errors raise an alert, and recovering logs it
 class Boom(FakeBison):
     def campaigns_of(self, sid):
@@ -706,4 +736,56 @@ check([o["domain"] for o in ordering.active_orders()] == ["a.com", "b.com"] and 
       "every page of Hypertide's orders is read, passing the cursor back")
 requests.get = _old_get
 check(store.DEFAULT_SETTINGS["bench_min_score"] == 90, "a pool domain needs recovery score 90 (Hypertide's Ready)")
+
+# ---- Bison refuses removal on an active campaign: pause, remove, resume ----
+_calls = []
+class _R:
+    def __init__(self, code, text="", j=None): self.status_code, self.text, self._j = code, text, j or {}
+    def json(self): return self._j
+    def raise_for_status(self):
+        if self.status_code >= 400: raise RuntimeError(f"HTTP {self.status_code}")
+_removals = []
+def _fake_request(method, url, **kw):
+    _calls.append((method, url.split("/api/")[1]))
+    if url.endswith("remove-sender-emails"):
+        _removals.append(1)
+        return _R(422, "The campaign must be in a draft or paused state to remove sender emails") if len(_removals) == 1 else _R(200)
+    if url.endswith("/pause") or url.endswith("/resume"):
+        return _R(405) if method == "PATCH" else _R(200)         # PATCH not allowed there: falls back to POST
+    return _R(200)
+_old = (requests.request, requests.get)
+requests.request = _fake_request
+requests.get = lambda url, **kw: _R(200, j={"data": {"status": "active"}})
+note = rotation.Bison().remove(7, [1, 2])
+requests.request, requests.get = _old
+check("paused" in note and [c[1] for c in _calls if c[1].endswith(("pause", "resume"))] == ["campaigns/7/pause", "campaigns/7/pause", "campaigns/7/resume", "campaigns/7/resume"]
+      and _calls[-1][1] == "campaigns/7/resume", "an active campaign is paused, the mailboxes removed, and the campaign resumed")
+
+# --- retire to the Backup Pool: cancel, add, wait for Hypertide, give up after repeated refusals ---
+store.save_settings({"rotation_mode": "live"})
+store.kv_set("pool_queue", {}); store.kv_set("alerts_open", {})
+store.x("DELETE FROM rotation_log")
+rotation.enqueue_pool("gone.com")
+h = FakeHyper([]); h.add_answers = [(False, "409 not yet"), (True, "201 added")]
+rotation.pool_step("r1", True, h)
+q = store.kv_get("pool_queue")["gone.com"]
+check(h.cancels == 1 and q["state"] == "cancelling" and "waiting" in q["note"], "cancel goes out once, and a not-yet pool add just waits")
+rotation.pool_step("r2", True, h)
+check(h.cancels == 1 and store.kv_get("pool_queue")["gone.com"]["state"] == "in_pool", "the next pass adds it to the pool without cancelling again")
+rotation.pool_step("r3", True, h)
+check(h.cancels == 1 and not [a for a in alerts.open_alerts() if "pool" in a], "a domain already in the pool is left alone and raises nothing")
+# refused every time -> one alert after POOL_GIVE_UP tries
+rotation.enqueue_pool("stuck.com")
+h2 = FakeHyper([]); h2.state = "cancelled_order"; h2.add_answers = [(False, "403 no access")] * 10
+for i in range(rotation.POOL_GIVE_UP):
+    rotation.pool_step(f"s{i}", True, h2)
+check(any("stuck.com" in a for a in alerts.open_alerts()), "repeated refusals raise one alert for a person")
+h2.state = "in_pool"
+rotation.pool_step("s9", True, h2)
+check(not any("stuck.com" in a for a in alerts.open_alerts()), "the alert clears once the domain is in the pool")
+# dry mode reads and plans, changes nothing
+rotation.enqueue_pool("plan.com")
+h3 = FakeHyper([])
+rotation.pool_step("d1", False, h3)
+check(h3.cancels == 0 and store.kv_get("pool_queue")["plan.com"]["state"] == "queued", "dry run does not cancel anything")
 print("all checks passed")

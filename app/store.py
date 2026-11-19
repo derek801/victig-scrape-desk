@@ -70,8 +70,8 @@ DEFAULT_SETTINGS = {
     "inbox_reply_warn_pct": 1.0,  # reply rate: lower is worse. Under 1.0% is the warning zone ...
     "inbox_window_min_sends": 200, # a 7/14-day health window needs this many sends, else the lifetime numbers are used
     "rotation_mode": "dry",       # off | dry (plan and log only) | live (really swaps in Bison). Stays dry until a person flips it
-    "rotation_daily_cap": 1,      # at most this many live swaps per day
-    "rotation_mass_limit": 5,     # more than this many domains in Retire at once = stop and tell the team (bad list, not burnt domains)
+    "rotation_daily_cap": 5,      # at most this many live swaps per day
+    "rotation_mass_limit": 5,     # most domains swapped out in one pass: the worst ones go first, the rest wait (0 = no limit)
     "bench_target": 5,            # warmed, DNS-verified spare domains to keep ready
     "bench_autobuy": False,       # the desk may order bench domains in Hypertide (also needs rotation_mode=live). OFF until a person turns it on
     "bench_order_max_per_day": 5, # never order more than this many domains in a day (only ever tops the bench up to bench_target)
