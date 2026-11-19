@@ -2,8 +2,8 @@
 retired one off its campaigns, and note that the bench needs refilling.
 
 Modes (setting `rotation_mode`):  off | dry (default: plans and logs, changes nothing) | live (really calls Bison).
-Guardrails: a daily swap cap, a mass-retire stop (many domains failing at once usually means a bad list or bad copy,
-not burnt domains, so nothing is swapped and the team is told), the replacement must be warm AND have healthy DNS
+Guardrails: a daily swap cap and a per-pass limit (when more domains are in Retire than that, the worst ones are replaced
+first and the rest wait, with a note on the page), the replacement must be warm AND have healthy DNS
 (re-checked at swap time), the new mailboxes go onto each campaign BEFORE the old ones come off (no gap, leads stay
 with the campaign), and every step is written to `rotation_log`.
 
@@ -21,7 +21,7 @@ import requests
 from . import alerts, config, inbox, ordering, store
 
 NEEDS_PERSON = ["Buy new bench domains: the desk can order them, but only when bench_autobuy is switched on and rotation is live "
-                "(until then a person orders them in Hypertide)", "Cancel or decommission a retired domain's Hypertide subscription",
+                "(until then a person orders them in Hypertide)", "Put a retired domain in Hypertide's Backup Pool to recover: cancel its subscription with the pool opt-in (the desk cannot do this step yet)",
                 "Registrar nameserver changes for domains Hypertide does not manage"]
 WARM_MIN = 85                      # average Bison warm-up score a replacement's mailboxes need
 ERR_KEY = "inbox:rotation:error"
@@ -54,8 +54,40 @@ class Bison:
     def attach(self, cid, ids):
         self._post(cid, "attach-sender-emails", ids)
 
+    def _try(self, methods, path, **kw):
+        """Bison's own docs disagree about some methods (DELETE in the text, POST in the examples): try each in turn."""
+        r = None
+        for m in methods:
+            r = requests.request(m, f"{self.base}{path}", headers=self.h, timeout=40, **kw)
+            if r.status_code not in (404, 405):
+                break
+        return r
+
+    def status(self, cid):
+        r = requests.get(f"{self.base}/api/campaigns/{cid}", headers=self.h, timeout=40)
+        r.raise_for_status()
+        return str((r.json().get("data") or {}).get("status") or "").lower()
+
     def remove(self, cid, ids):
-        self._post(cid, "remove-sender-emails", ids)
+        """Take mailboxes off a campaign. Bison only allows that on a draft or paused campaign, so an active one is paused
+        for the moment this takes and put back (the resume runs even if the removal fails). Returns a note for the audit log."""
+        body = {"sender_email_ids": ids}
+        r = self._try(("DELETE", "POST"), f"/api/campaigns/{cid}/remove-sender-emails", json=body)
+        if r.status_code < 300:
+            return "removed"
+        if r.status_code != 422 or "draft or paused" not in r.text:
+            r.raise_for_status()
+        was = self.status(cid)
+        if was not in ("active", "running", "launching"):
+            r.raise_for_status()
+        p = self._try(("PATCH", "POST"), f"/api/campaigns/{cid}/pause")
+        p.raise_for_status()
+        try:
+            r = self._try(("DELETE", "POST"), f"/api/campaigns/{cid}/remove-sender-emails", json=body)
+            r.raise_for_status()
+        finally:
+            self._try(("PATCH", "POST"), f"/api/campaigns/{cid}/resume")
+        return "campaign was active: paused, removed, resumed"
 
 
 class Hypertide:
@@ -198,12 +230,6 @@ def run_cycle(bison=None, hyper=None, force_dry=False):
                   and life.get(d["domain"], {}).get("state") not in ("resting", "decommissioned")]
         result["retire"] = [d["domain"] for d in retire]
         result["mass_limit"] = s["rotation_mass_limit"]
-        if len(retire) > s["rotation_mass_limit"]:
-            notice(MASS_KEY, f"{len(retire)} domains hit Retire at once, so rotation stopped (that pattern usually means a bad "
-                   "list or bad copy, not burnt domains). Nothing was swapped.")
-            log(run, mode, "mass_stop", None, False, {"retire": len(retire), "limit": s["rotation_mass_limit"]})
-            result["skipped"] = "mass"
-            return result
         notice(MASS_KEY)
         allb = bench(hyper, fresh_dns=bool(retire))
         b = [x for x in allb if x["ready"]]
@@ -221,7 +247,12 @@ def run_cycle(bison=None, hyper=None, force_dry=False):
             _finish_ok(run, mode)
             return result
         bison = bison or Bison()
-        for d in sorted(retire, key=lambda x: x["health"]["score"] if x["health"]["score"] is not None else 0)[:room]:
+        batch = min(room, s["rotation_mass_limit"]) if s["rotation_mass_limit"] > 0 else room
+        worst = sorted(retire, key=lambda x: x["health"]["score"] if x["health"]["score"] is not None else 0)
+        if len(worst) > batch:
+            notice(MASS_KEY, f"{len(worst)} domains are in Retire. The worst {batch} are being replaced now; the rest wait for their turn "
+                   "(the limit per pass, today's swap limit and the bench).")
+        for d in worst[:batch]:
             if not b:
                 notice(EMPTY_KEY, f"{d['domain']} needs replacing but the bench has no ready domain. Order more bench domains.")
                 log(run, mode, "bench_empty", d["domain"], False, {})
@@ -271,8 +302,8 @@ def _swap(run, live, bison, d, repl, life):
             bison.attach(p["campaign"], p["attach"])
             log(run, mode, "attach", d["domain"], True, {"campaign": p["campaign"], "ids": p["attach"]})
         for p in plan:
-            bison.remove(p["campaign"], p["remove"])
-            log(run, mode, "remove", d["domain"], True, {"campaign": p["campaign"], "ids": p["remove"]})
+            note = bison.remove(p["campaign"], p["remove"])
+            log(run, mode, "remove", d["domain"], True, {"campaign": p["campaign"], "ids": p["remove"], "note": note})
         life[d["domain"]] = {"state": "resting", "since": store.iso(), "replaced_by": repl["domain"]}
         life[repl["domain"]] = {"state": "active", "since": store.iso()}
         store.kv_set("domain_lifecycle", life)
