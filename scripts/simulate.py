@@ -436,6 +436,28 @@ class FakeHyper:
     def pool(self):
         return self.rows
 
+    # Backup Pool retire flow: scripted so tests can make Hypertide accept, wait or refuse
+    state = "active_order"
+    add_answers = None
+    cancels = 0
+
+    def classify(self, domain):
+        return {"state": self.state, "order_id": "rec" + domain, "raw": {}}
+
+    def order_of(self, domain):
+        return "rec" + domain, "sub_1"
+
+    def cancel(self, oid, sid):
+        self.cancels += 1
+        self.state = "cancelled_order"
+        return True, "200 ok"
+
+    def add_to_pool(self, oid):
+        a = (self.add_answers or [(True, "201 added")]).pop(0)
+        if a[0]:
+            self.state = "in_pool"
+        return a
+
 
 store.x("DELETE FROM inbox_history")
 store.kv_set("alerts_open", {})
@@ -738,4 +760,32 @@ note = rotation.Bison().remove(7, [1, 2])
 requests.request, requests.get = _old
 check("paused" in note and [c[1] for c in _calls if c[1].endswith(("pause", "resume"))] == ["campaigns/7/pause", "campaigns/7/pause", "campaigns/7/resume", "campaigns/7/resume"]
       and _calls[-1][1] == "campaigns/7/resume", "an active campaign is paused, the mailboxes removed, and the campaign resumed")
+
+# --- retire to the Backup Pool: cancel, add, wait for Hypertide, give up after repeated refusals ---
+store.save_settings({"rotation_mode": "live"})
+store.kv_set("pool_queue", {}); store.kv_set("alerts_open", {})
+store.x("DELETE FROM rotation_log")
+rotation.enqueue_pool("gone.com")
+h = FakeHyper([]); h.add_answers = [(False, "409 not yet"), (True, "201 added")]
+rotation.pool_step("r1", True, h)
+q = store.kv_get("pool_queue")["gone.com"]
+check(h.cancels == 1 and q["state"] == "cancelling" and "waiting" in q["note"], "cancel goes out once, and a not-yet pool add just waits")
+rotation.pool_step("r2", True, h)
+check(h.cancels == 1 and store.kv_get("pool_queue")["gone.com"]["state"] == "in_pool", "the next pass adds it to the pool without cancelling again")
+rotation.pool_step("r3", True, h)
+check(h.cancels == 1 and not [a for a in alerts.open_alerts() if "pool" in a], "a domain already in the pool is left alone and raises nothing")
+# refused every time -> one alert after POOL_GIVE_UP tries
+rotation.enqueue_pool("stuck.com")
+h2 = FakeHyper([]); h2.state = "cancelled_order"; h2.add_answers = [(False, "403 no access")] * 10
+for i in range(rotation.POOL_GIVE_UP):
+    rotation.pool_step(f"s{i}", True, h2)
+check(any("stuck.com" in a for a in alerts.open_alerts()), "repeated refusals raise one alert for a person")
+h2.state = "in_pool"
+rotation.pool_step("s9", True, h2)
+check(not any("stuck.com" in a for a in alerts.open_alerts()), "the alert clears once the domain is in the pool")
+# dry mode reads and plans, changes nothing
+rotation.enqueue_pool("plan.com")
+h3 = FakeHyper([])
+rotation.pool_step("d1", False, h3)
+check(h3.cancels == 0 and store.kv_get("pool_queue")["plan.com"]["state"] == "queued", "dry run does not cancel anything")
 print("all checks passed")
