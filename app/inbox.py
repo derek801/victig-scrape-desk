@@ -366,7 +366,7 @@ def overview():
     for d in store.q("SELECT domain, COUNT(*) mailboxes, SUM(status='Connected') connected, SUM(warmup) warmup, "
                      "SUM(sent) sent, SUM(bounced) bounced, SUM(replied) replied, SUM(interested) interested, "
                      "SUM(CASE WHEN status='Connected' THEN daily_limit ELSE 0 END) limit_sum, "
-                     "AVG(warmup_score) warmup_avg FROM inbox_senders WHERE " + live_sql() + " GROUP BY domain"):
+                     "AVG(CASE WHEN warmup=1 THEN warmup_score END) warmup_avg FROM inbox_senders WHERE " + live_sql() + " GROUP BY domain"):
         rate = round(d["bounced"] / d["sent"] * 100, 2) if d["sent"] >= s["inbox_min_sends"] else None
         o = ht.get(d["domain"], {})
         rr = round((d["replied"] or 0) / d["sent"] * 100, 2) if d["sent"] >= s["inbox_reply_min_sends"] else None

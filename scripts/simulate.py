@@ -357,7 +357,7 @@ hs = {d["domain"]: d["health"] for d in o["domains"]}
 check(hs["good.com"]["zone"] == "healthy" and hs["bad.com"]["score"] < hs["warn.com"]["score"] < hs["good.com"]["score"]
       and hs["tiny.com"]["zone"] == "new" and hs["bad.com"]["drag"]["key"] == "reply" and hs["good.com"]["basis"] == "lifetime",
       "health score orders good > warn > bad; bad's biggest drag is reply rate; too few sends = new")
-check(hs["good.com"]["coverage"] == 58 and o["zones"]["new"] == 1, "complaints and blacklists are unreadable, volume needs a window, sample has no interested replies: coverage 58%; zone counts")
+check(hs["good.com"]["coverage"] == 68 and o["zones"]["new"] == 1, "complaints and blacklists are unreadable and volume needs a window: coverage 68% of the scored weight; zone counts")
 check(o["reply_rate"] is not None and o["reply_counts"] == {"critical": 1, "warn": 1, "ok": 1, "new": 1}, "overall reply rate and band counts")
 check(by["bad.com"]["ht_status"] == "NPC" and o["disconnected"] == 1, "Hypertide status joined; disconnected counted")
 check(alerts.due_alerts() == {}, "domain trouble raises no alerts: only the automation breaking does")
@@ -788,4 +788,14 @@ rotation.enqueue_pool("plan.com")
 h3 = FakeHyper([])
 rotation.pool_step("d1", False, h3)
 check(h3.cancels == 0 and store.kv_get("pool_queue")["plan.com"]["state"] == "queued", "dry run does not cancel anything")
+
+# positive replies are not scored; warm-up only counts while warm-up is on
+rp = health.score_domain({**base, "interested": 0}, FL)
+check("positive" not in rp["factors"] and rp["score"] == health.score_domain({**base, "interested": 9}, FL)["score"], "positive replies do not affect the score")
+rw = health.score_domain({**base, "warmup": None}, FL)
+check("warmup" not in rw["factors"] and rw["zone"] == "healthy", "a domain with no warm-up reading is scored on the rest")
+store.x("DELETE FROM inbox_senders")
+store.x("INSERT INTO inbox_senders(id,email,domain,status,warmup,daily_limit,sent,bounced,replied,interested,warmup_score) VALUES (1,'a@w.com','w.com','Connected',0,5,100,1,2,0,0),(2,'b@w.com','w.com','Connected',0,5,100,1,2,0,0),(3,'c@x.com','x.com','Connected',1,5,100,1,2,0,90)")
+_o = {d["domain"]: d for d in inbox.overview()["domains"]}
+check(_o["w.com"]["warmup_avg"] is None and _o["x.com"]["warmup_avg"] == 90, "warm-up score is averaged only over mailboxes with warm-up on")
 print("all checks passed")
