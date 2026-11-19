@@ -689,4 +689,21 @@ rotation.log("r1", "dry", "swap", "a.com", True, {"out": "a.com", "in": "z.com"}
 rotation.log("r2", "live", "swap", "a.com", True, {"out": "a.com", "in": "z.com", "campaigns": 2})
 sw = inbox.daily_trend(30)["swaps"]
 check(len(sw) == 1 and sw[0]["moves"] == [{"out": "a.com", "in": "z.com"}], "only live swaps are tagged, with who went out and who came in")
+
+# ---- Hypertide orders are read page by page ----
+_pages = [{"orders": [{"domain": "a.com", "paymentStatus": "Paid", "status": "Done"}], "hasMore": True, "nextCursor": "c1"},
+          {"orders": [{"domain": "b.com", "paymentStatus": "Paid", "status": "Error"}], "hasMore": False, "nextCursor": None}]
+_seen = []
+class _Resp:
+    def __init__(self, j, code=200): self._j, self.status_code, self.text = j, code, json.dumps(j)
+    def json(self): return self._j
+    def raise_for_status(self): pass
+def _paged_get(url, params=None, **kw):
+    _seen.append((params or {}).get("cursor")); return _Resp(_pages[0] if not (params or {}).get("cursor") else _pages[1])
+_old_get = requests.get
+requests.get = _paged_get
+check([o["domain"] for o in ordering.active_orders()] == ["a.com", "b.com"] and _seen == [None, "c1"],
+      "every page of Hypertide's orders is read, passing the cursor back")
+requests.get = _old_get
+check(store.DEFAULT_SETTINGS["bench_min_score"] == 90, "a pool domain needs recovery score 90 (Hypertide's Ready)")
 print("all checks passed")

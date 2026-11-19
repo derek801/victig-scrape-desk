@@ -97,11 +97,30 @@ def charge(record_ids):
     return ok, f"{r.status_code} {ps or ''} {say}".strip()
 
 
+def active_orders(max_pages=200):
+    """Every paid order Hypertide has, not just the first page: it returns 100 at a time with hasMore and nextCursor
+    (sent back as `cursor`). A cursor lives 15 minutes; if one is refused the read restarts from the first page once."""
+    for restart in range(2):
+        out, cursor = [], None
+        for _ in range(max_pages):
+            r = requests.get(f"{API}/orders/active", params={"limit": 100, **({"cursor": cursor} if cursor else {})},
+                             headers=_headers(), timeout=60)
+            if r.status_code == 400 and cursor and restart == 0 and "CURSOR" in r.text.upper():
+                break                                   # expired cursor: start over
+            r.raise_for_status()
+            j = r.json()
+            out += j.get("orders", [])
+            if not j.get("hasMore") or not j.get("nextCursor"):
+                return out
+            cursor = j["nextCursor"]
+        else:
+            return out
+    raise RuntimeError("Hypertide kept refusing the page cursor")
+
+
 def fetch_payment_status():
     """{domain: paymentStatus} from Hypertide's active orders (read-only)."""
-    r = requests.get(f"{API}/orders/active", headers=_headers(), timeout=60)
-    r.raise_for_status()
-    return {o["domain"].lower(): str(o.get("paymentStatus") or "") for o in r.json().get("orders", [])}
+    return {o["domain"].lower(): str(o.get("paymentStatus") or "") for o in active_orders()}
 
 
 def reconcile(run="reconcile"):
