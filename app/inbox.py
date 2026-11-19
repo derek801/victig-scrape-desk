@@ -145,12 +145,10 @@ def refresh_dns(domains, max_age_h=24):
 
 
 def fetch_hypertide():
-    """{domain: {status, created, tool}} from Hypertide's active orders (one call)."""
-    r = requests.get("https://backend.hypertide.io/api/v1/orders/active",
-                     headers={"X-API-Key": config.HYPERTIDE_API_KEY}, timeout=60)
-    r.raise_for_status()
+    """{domain: {status, created, tool}} from all of Hypertide's active orders (it pages 100 at a time)."""
+    from . import ordering
     return {o["domain"].lower(): {"status": o.get("status"), "created": (o.get("createdAt") or "")[:10],
-                                  "tool": o.get("sendingTool")} for o in r.json().get("orders", [])}
+                                  "tool": o.get("sendingTool")} for o in ordering.active_orders()}
 
 
 # ---- storing -------------------------------------------------------------------------------------

@@ -80,7 +80,7 @@ DEFAULT_SETTINGS = {
     "bench_sender_names": ["Josh Diederich", "Morgan Verhoef", "Stephen Treanor"],  # every new bench domain's mailboxes are split evenly across these names
     "bench_inbox_quantity": 50,   # Hypertide: 25 or 50 (creates +2 spare mailboxes)
     "bench_min_days": 14,         # a desk-ordered domain is not bench-ready before this many days of warm-up
-    "bench_min_score": 70,        # Hypertide recoveryHealth score a bench domain needs (scale unverified; tune after seeing real ones)
+    "bench_min_score": 90,        # Hypertide recoveryHealth score (0-100) a pool domain needs: 90+ Ready, 70-89 Almost Ready, under 70 Keep Warming
     "health_weights": {},          # overrides for app/health.py DEFAULT_WEIGHTS, e.g. {"reply": 35}
     "inbox_reply_good_pct": 1.0,  # the team's goal: 1% reply rate or more is good; the health score's reply signal hits 100 here
     "inbox_reply_crit_pct": 0.6,  # ... under 0.6% is critical. (Fleet median is about 1.3%, overall about 1.05%.)
