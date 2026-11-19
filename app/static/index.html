@@ -100,6 +100,60 @@ dialog .hd b{flex:1}
 dialog .bd{padding:6px 18px 16px;max-height:70vh;overflow:auto}
 a{color:var(--blue)}
 .st-done{color:var(--green)}.st-pending{color:var(--mute)}.st-running{color:var(--blue);font-weight:600}.st-failed,.st-capped{color:var(--amber)}.st-split,.st-skipped{color:#9a9a9a}
+
+/* ---- layout ---- */
+header{position:sticky;top:0;z-index:30}
+main{max-width:1280px;gap:20px}
+main>*,.grid2>*{min-width:0}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+#inboxKpis .kpi[data-i="1"]{border-left-color:var(--green-brand)}
+#inboxKpis .kpi[data-i="2"]{border-left-color:var(--orange)}
+#inboxKpis .kpi[data-i="3"]{border-left-color:var(--orange-shade)}
+#inboxKpis .kpi[data-i="4"]{border-left-color:var(--red)}
+#inboxKpis .kpi[data-i="0"],#inboxKpis .kpi[data-i="5"],#inboxKpis .kpi[data-i="6"]{border-left-color:#c9c9c9}
+.card h2{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.sub3{margin:16px 0 4px;font-size:14px}
+tbody tr:hover td{background:#fafaf8}
+details.fold>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:10px}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary::before{content:"";width:7px;height:7px;border-right:2px solid var(--mute);border-bottom:2px solid var(--mute);transform:rotate(-45deg);flex:none;transition:transform .2s cubic-bezier(.23,1,.32,1)}
+details.fold[open]>summary::before{transform:rotate(45deg)}
+details.fold>summary h2{margin:0}
+details.fold[open]>summary{margin-bottom:14px}
+details.fold.inner{margin-top:14px}
+details.fold.inner>summary{font-weight:600;font-size:14px;font-family:var(--head)}
+@supports (interpolate-size:allow-keywords){
+  :root{interpolate-size:allow-keywords}
+  details.fold::details-content{block-size:0;overflow:clip;transition:block-size .25s cubic-bezier(.23,1,.32,1),content-visibility .25s allow-discrete}
+  details.fold[open]::details-content{block-size:auto}
+}
+
+/* ---- motion: calm, because people sit in this page all day ----
+   Only occasional things move (switching tabs, opening a fold or the dialog). Hover and press stay under 160ms.
+   Entrances use opacity + 8px of travel with the strong ease-out curve; reduced motion keeps the fade only. */
+@keyframes rise{from{opacity:0;transform:translateY(8px)}}
+@keyframes fade{from{opacity:0}}
+main:not([hidden])>*{animation:rise .32s cubic-bezier(.23,1,.32,1) backwards}
+main:not([hidden])>*:nth-child(2){animation-delay:40ms}main:not([hidden])>*:nth-child(3){animation-delay:80ms}
+main:not([hidden])>*:nth-child(4){animation-delay:120ms}main:not([hidden])>*:nth-child(5){animation-delay:160ms}
+main:not([hidden])>*:nth-child(n+6){animation-delay:200ms}
+dialog{transition:opacity .2s cubic-bezier(.23,1,.32,1),transform .2s cubic-bezier(.23,1,.32,1),overlay .2s allow-discrete,display .2s allow-discrete}
+dialog:not([open]){opacity:0;transform:scale(.96)}
+dialog[open]{opacity:1;transform:none}
+@starting-style{dialog[open]{opacity:0;transform:scale(.96)}}
+dialog::backdrop{background:#2424248c;transition:opacity .2s}
+.bar i{transition:width .5s cubic-bezier(.23,1,.32,1)}
+.pagetabs button,tbody tr td{transition:color .15s,border-color .15s,background-color .12s}
+@media (hover:none){tbody tr:hover td{background:transparent}}
+@media (prefers-reduced-motion:reduce){
+  main:not([hidden])>*{animation-name:fade;animation-delay:0s!important}
+  details.fold>summary::before{transition:none}
+  details.fold::details-content{transition:none}
+  dialog,dialog:not([open]){transform:none}
+  @starting-style{dialog[open]{transform:none}}
+  button:active:not(:disabled){transform:none}
+}
+@media(max-width:900px){header{position:static}}
 @media(max-width:1000px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2,.settings{grid-template-columns:1fr}.regions{grid-template-columns:repeat(2,1fr)}main{padding:14px 16px 40px}}
 @media(max-width:560px){.regions{grid-template-columns:1fr}.acct-table th:nth-child(5),.acct-table td:nth-child(5){display:none}}
 </style>
@@ -116,12 +170,18 @@ a{color:var(--blue)}
 </header>
 <main id="inboxMain" hidden>
   <div id="inboxBanners" style="display:grid;gap:8px"></div>
+  <div class="kpis" id="inboxKpis"></div>
   <section class="card">
     <h2>Reply rate &amp; bounce rate by day <small id="trendNote"></small></h2>
     <div id="trendChart" style="width:100%"></div>
     <div id="trendSwaps" class="small" style="margin-top:6px"></div>
   </section>
-  <div class="kpis" id="inboxKpis"></div>
+  <section class="card">
+    <h2>Sending domains <small id="inboxNote"></small></h2>
+    <div class="filters" id="inboxFilters"></div>
+    <div style="overflow-x:auto"><table id="inboxTable"></table></div>
+    <div class="muted small" style="margin-top:8px" id="inboxFoot"></div>
+  </section>
   <section class="card">
     <h2>Bench &amp; rotation <small id="rotNote"></small></h2>
     <div class="filters" style="margin-bottom:8px"><button onclick="rotTest('simulate')" id="btnSim">Run test (simulation)</button><button onclick="rotTest('dry')" id="btnDry">Check now (dry run on real data)</button><span class="muted small" id="rotTestNote">The simulation uses fake data and changes nothing. Check now reads your real Bison and Hypertide but only plans; nothing is swapped or bought.</span></div>
@@ -130,16 +190,10 @@ a{color:var(--blue)}
     <div id="rotTestOut" class="small" style="margin-bottom:10px"></div>
     <div class="kpis" id="rotKpis"></div>
     <div style="overflow-x:auto"><table id="benchTable"></table></div>
-    <h3 style="margin:14px 0 4px;font-size:14px">Still needs a person</h3>
+    <h3 class="sub3">Still needs a person</h3>
     <ul class="small" id="rotPerson" style="margin:0 0 8px 18px"></ul>
-    <h3 style="margin:14px 0 4px;font-size:14px">Audit log <small class="muted">(latest 3 checks; older ones in the dropdown)</small></h3>
-    <div id="rotLog"></div>
-  </section>
-  <section class="card">
-    <h2>Sending domains <small id="inboxNote"></small></h2>
-    <div class="filters" id="inboxFilters"></div>
-    <div style="overflow-x:auto"><table id="inboxTable"></table></div>
-    <div class="muted small" style="margin-top:8px" id="inboxFoot"></div>
+    <details class="fold inner"><summary>Audit log <small class="muted">latest 3 checks; older ones in the dropdown</small></summary>
+    <div id="rotLog"></div></details>
   </section>
 </main>
 <main id="deskMain">
@@ -174,8 +228,7 @@ a{color:var(--blue)}
     <div class="regions" id="regions"></div>
   </section>
 
-  <section class="card">
-    <h2>Settings</h2>
+  <details class="card fold"><summary><h2>Settings <small>launch window, titles, limits</small></h2></summary>
     <div class="settings">
       <div>
         <div class="muted small" style="margin-bottom:6px">Job titles (one per line, matched against current title)</div>
@@ -194,7 +247,7 @@ a{color:var(--blue)}
         <div class="muted small" style="margin-top:10px" id="calNote"></div>
       </div>
     </div>
-  </section>
+  </details>
   <section class="card">
     <h2>Clay tables <small>one per rep · Clay caps a table at 50,000 rows, counting deleted ones</small></h2>
     <div style="overflow-x:auto"><table id="clay"></table></div>
@@ -395,7 +448,7 @@ function renderInbox(){
   const hb=hideable(b);$("inboxBanners").innerHTML=hb.html+hiddenLink(hb.hidden);
   const z=d.zones||{};
   $("inboxKpis").innerHTML=[[fmt(d.domains.length),"Sending domains"],[fmt(z.healthy||0),"Healthy (75+)"],[fmt(z.watch||0),"Watch (55-74)"],[fmt(z.danger||0),"Danger (35-54)"],[fmt(z.retire||0),"Retire (under 35 or hard-fail)"],[d.reply_rate==null?"–":d.reply_rate+"%","Reply rate overall (lifetime)"],[fmt(d.disconnected),`Mailboxes not connected of ${fmt(d.mailboxes)}`]]
-    .map(([v,l],i)=>`<div class="kpi"><div class="v" style="${i===4&&z.retire?"color:var(--red)":i===3&&z.danger?"color:var(--amber)":""}">${v}</div><div class="l">${l}</div></div>`).join("");
+    .map(([v,l],i)=>`<div class="kpi" data-i="${i}"><div class="v" style="${i===4&&z.retire?"color:var(--red)":i===3&&z.danger?"color:var(--amber)":""}">${v}</div><div class="l">${l}</div></div>`).join("");
   $("inboxNote").textContent=d.sync&&d.sync.at?`synced ${ago(d.sync.at)} · ${d.rate==null?"":d.rate+"% lifetime bounce overall"}`:"not synced yet";
   const f=[["all","All"],["retire","Retire"],["danger","Danger"],["watch","Watch"],["healthy","Healthy"],["lowreply","Low reply"],["disc","Has disconnected"]];
   $("inboxFilters").innerHTML=f.map(([k,l])=>`<button class="${inboxFilter===k?"on":""}" onclick="inboxFilter='${k}';renderInbox()">${l}</button>`).join("")+`<button style="margin-left:auto" onclick="inboxSync()">Sync now</button>`;
