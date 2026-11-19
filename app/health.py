@@ -15,7 +15,7 @@ Pure functions only (no database, no network), so the whole thing can be tested 
 
 DEFAULT_WEIGHTS = {            # proposed weights; editable in settings ("health_weights")
     "reply": 30,               # reply rate vs the fleet's
-    "positive": 15,            # interested replies vs the fleet's
+    "positive": 0,             # not scored: whether a reply is positive depends on the list and offer, not the domain (set a weight to bring it back)
     "warmup": 15,              # Bison warm-up score (inbox placement proxy)
     "complaints": 12,          # spam complaint rate (not readable yet)
     "blacklist": 8,            # major blocklists (not readable yet)
