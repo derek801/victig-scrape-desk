@@ -6,39 +6,57 @@
 <title>Scrape Desk</title>
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Ubuntu:wght@500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
 <style>
-:root{--bg:#f5f6fa;--card:#fff;--ink:#141824;--mute:#667085;--line:#e6e8ef;--blue:#1d4ed8;--red:#c0262d;--amber:#b45309;--green:#047857;--soft:#f0f3fa}
+:root{
+  /* VICTIG brand (Brand Guide, July 2026): charcoal + white space lead; green is the call-to-action colour, orange only a directional accent */
+  --charcoal:#333333;--charcoal-deep:#242424;--green-brand:#84B637;--green-tint:#A9CC73;--green-shade:#5C7F27;--orange:#FF9000;--orange-shade:#B36500;
+  --bg:#F9F9F9;--card:#fff;--ink:#333333;--mute:#707070;--line:#e7e7e7;--soft:#f3f4f1;
+  --blue:var(--green-shade);                 /* links, bars, "running": brand green shade (kept the old variable name) */
+  --red:#c0262d;--amber:#B36500;--green:var(--green-shade);   /* status colours stay readable: red / amber / green */
+  --head:Ubuntu,system-ui,sans-serif;
+}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 Inter,system-ui,sans-serif}
-header{display:flex;align-items:center;gap:14px;padding:14px 24px;background:#0f172a;color:#fff;flex-wrap:wrap}
-header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px}
-header .sub{color:#94a3b8;font-size:12.5px}
+body{margin:0;background:var(--bg);color:var(--ink);font:13.5px/1.5 Poppins,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--head);letter-spacing:.02em}
+header{position:relative;overflow:hidden;display:flex;align-items:center;gap:16px;padding:12px 28px;background:var(--charcoal);color:#fff;flex-wrap:wrap}
+header::after{content:"";position:absolute;right:-30px;top:0;bottom:0;width:260px;background:linear-gradient(115deg,var(--orange) 0%,var(--green-brand) 100%);clip-path:polygon(38% 0,100% 0,100% 100%,0 100%);opacity:.95;pointer-events:none}
+header>*{position:relative;z-index:1}
+header .brand{display:flex;align-items:center;gap:14px}
+header .logo{height:34px;width:auto;display:block}
+header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.04em;padding-left:14px;border-left:1px solid #5a5a5a}
+header .sub{color:#c7c7c7;font-size:12px;font-weight:300;padding-left:14px}
 header .sp{flex:1}
 .mode{padding:5px 11px;border-radius:999px;font-weight:600;font-size:12.5px}
 .mode.dry{background:#fef3c7;color:#78350f}.mode.live{background:#d1fae5;color:#064e3b}.mode.paused{background:#e2e8f0;color:#1e293b}.mode.broken{background:#fee2e2;color:#7f1d1d}
-button{font:inherit;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);padding:6px 12px;border-radius:8px;cursor:pointer}
-button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
-button.danger{background:#fff;border-color:#f3c2c4;color:var(--red)}
+button{font:inherit;font-weight:500;border:1px solid #d6d6d6;background:#fff;color:var(--ink);padding:6px 13px;border-radius:8px;cursor:pointer;transition:background-color .15s,border-color .15s,transform .1s}
+button:hover:not(:disabled){border-color:var(--charcoal);background:#fafafa}
+button:active:not(:disabled){transform:scale(.97)}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--green-brand);outline-offset:2px}
+button.primary{background:var(--green-brand);border-color:var(--green-brand);color:var(--charcoal-deep);font-weight:700;text-transform:uppercase;letter-spacing:.06em;font-size:12px}
+button.primary:hover:not(:disabled){background:var(--green-tint);border-color:var(--green-tint)}
+button.danger{background:#fff;border-color:#f0c4c6;color:var(--red)}
 button:disabled{opacity:.45;cursor:default}
-header button{background:#1e293b;border-color:#334155;color:#fff}
-header button.primary{background:#2563eb;border-color:#2563eb}
+header button{background:#444;border-color:#5f5f5f;color:#fff}
+header button:hover:not(:disabled){background:#4f4f4f;border-color:#8a8a8a}
+header button.primary{background:var(--green-brand);border-color:var(--green-brand);color:var(--charcoal-deep)}
+header button.primary:hover:not(:disabled){background:var(--green-tint);border-color:var(--green-tint)}
 main{max-width:1320px;margin:0 auto;padding:20px 24px 60px;display:grid;gap:18px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
-.card h2{font-size:15px;margin:0 0 12px;font-weight:700}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px 20px}
+.card h2{font-size:16px;margin:0 0 12px;font-weight:700;color:var(--charcoal)}
 .card h2 small{font-weight:500;color:var(--mute);margin-left:6px;font-size:12.5px}
 .banner{border-radius:10px;padding:10px 14px;font-weight:500}
 .banner.red{background:#fde8e8;color:#7f1d1d;border:1px solid #f7caca}
 .banner.green{background:#d1fae5;color:#064e3b;border:1px solid #a7f3d0}
 .banner.amber{background:#fff7e0;color:#78350f;border:1px solid #f6dfa0}
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
-.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px}
-.kpi .v{font-size:26px;font-weight:700;letter-spacing:-.5px}
+.kpi{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--green-brand);border-radius:10px;padding:14px 18px}
+.kpi .v{font-family:var(--head);font-size:28px;font-weight:700;letter-spacing:.01em;line-height:1.2}
 .kpi .l{color:var(--mute);font-size:12.5px}
 table{width:100%;border-collapse:collapse}
-th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--mute);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);font-weight:600;padding:6px 8px;border-bottom:2px solid var(--line)}
 td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 tr:last-child td{border-bottom:0}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
@@ -54,7 +72,7 @@ textarea{width:100%;min-height:150px}
 .region h3{margin:0 0 6px;font-size:14px;display:flex;align-items:center;gap:6px}
 .chips{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0}
 .chip{font-size:11.5px;background:var(--soft);border-radius:999px;padding:2px 8px;cursor:pointer;border:1px solid transparent}
-.chip:hover{border-color:#c7d2fe}
+.chip:hover{border-color:var(--green-brand)}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mute);margin-top:8px}
 #map svg{width:100%;height:auto}
 .log{max-height:330px;overflow:auto;font-size:12.5px}
@@ -66,8 +84,9 @@ textarea{width:100%;min-height:150px}
 .bands label{margin-right:12px;white-space:nowrap}
 .tabs{display:flex;gap:6px;margin-bottom:12px}
 .pagetabs{display:flex;gap:4px;margin-left:10px}
-.pagetabs button{background:transparent;border-color:transparent;color:#cbd5e1;padding:6px 12px}
-.pagetabs button.on{background:#1e293b;border-color:#334155;color:#fff}
+.pagetabs button{background:transparent;border-color:transparent;border-radius:0;color:#d8d8d8;padding:8px 12px;border-bottom:3px solid transparent;font-weight:500}
+.pagetabs button:hover:not(:disabled){background:transparent;border-color:transparent;border-bottom-color:#8a8a8a;color:#fff}
+.pagetabs button.on{background:transparent;border-color:transparent;border-bottom:3px solid var(--green-brand);color:#fff;font-weight:600}
 .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600}
 .pill.critical{background:#fde8e8;color:#7f1d1d}.pill.warn{background:#fff3cd;color:#78350f}.pill.ok{background:#d1fae5;color:#064e3b}.pill.new{background:#eef1f6;color:var(--mute)}.pill.healthy{background:#d1fae5;color:#064e3b}.pill.watch{background:#fff3cd;color:#78350f}.pill.danger{background:#fed7aa;color:#7c2d12}.pill.retire{background:#7f1d1d;color:#fff}
 .filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
@@ -80,14 +99,15 @@ dialog .hd{display:flex;align-items:center;padding:14px 18px;border-bottom:1px s
 dialog .hd b{flex:1}
 dialog .bd{padding:6px 18px 16px;max-height:70vh;overflow:auto}
 a{color:var(--blue)}
-.st-done{color:var(--green)}.st-pending{color:var(--mute)}.st-running{color:var(--blue);font-weight:600}.st-failed,.st-capped{color:var(--amber)}.st-split,.st-skipped{color:#94a3b8}
+.st-done{color:var(--green)}.st-pending{color:var(--mute)}.st-running{color:var(--blue);font-weight:600}.st-failed,.st-capped{color:var(--amber)}.st-split,.st-skipped{color:#9a9a9a}
 @media(max-width:1000px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2,.settings{grid-template-columns:1fr}.regions{grid-template-columns:repeat(2,1fr)}main{padding:14px 16px 40px}}
 @media(max-width:560px){.regions{grid-template-columns:1fr}.acct-table th:nth-child(5),.acct-table td:nth-child(5){display:none}}
 </style>
 </head>
 <body>
 <header>
-  <div><h1>Scrape Desk</h1><div class="sub" id="sub">VICTIG Sales Nav scraping</div></div>
+  <div class="brand"><img class="logo" src="/logo.png" alt="VICTIG"><div><h1>Scrape Desk</h1></div></div>
+  <div class="sub" id="sub">VICTIG Sales Nav scraping</div>
   <nav class="pagetabs"><button id="tabDesk" class="on" onclick="showTab('desk')">Scrape Desk</button><button id="tabInbox" onclick="showTab('inbox')">Inbox Health</button></nav>
   <span class="sp"></span>
   <span id="mode" class="mode deskonly"></span>
@@ -348,7 +368,7 @@ function renderTrend(t){
   if(t.reply_good_pct)svg+=`<line x1="${pl}" x2="${W-pr}" y1="${y(t.reply_good_pct)}" y2="${y(t.reply_good_pct)}" stroke="var(--green)" stroke-dasharray="4 4" opacity=".6"><title>Reply-rate goal: ${t.reply_good_pct}%</title></line>`;
   days.forEach((d,i)=>{if(i%Math.ceil(days.length/8)===0||i===days.length-1)svg+=`<text x="${x(d)}" y="${H-8}" text-anchor="middle" font-size="10.5" fill="#667085">${d.slice(5).replace("-","/")}</text>`});
   (t.swaps||[]).forEach(w=>{if(idx(w.day)<0)return;const tip=w.moves.map(m=>`out ${m.out} → in ${m.in||"?"}`).join("\n");
-    svg+=`<line x1="${x(w.day)}" x2="${x(w.day)}" y1="${pt}" y2="${H-pb}" stroke="#7c3aed" stroke-dasharray="3 3"/><g><title>${esc(w.day+"\n"+tip)}</title><rect x="${x(w.day)-14}" y="0" width="28" height="14" rx="7" fill="#7c3aed"/><text x="${x(w.day)}" y="10.5" text-anchor="middle" font-size="9.5" fill="#fff" font-weight="700">⇄ ${w.moves.length}</text></g>`});
+    svg+=`<line x1="${x(w.day)}" x2="${x(w.day)}" y1="${pt}" y2="${H-pb}" stroke="#333333" stroke-dasharray="3 3"/><g><title>${esc(w.day+"\n"+tip)}</title><rect x="${x(w.day)-14}" y="0" width="28" height="14" rx="7" fill="#333333"/><text x="${x(w.day)}" y="10.5" text-anchor="middle" font-size="9.5" fill="#fff" font-weight="700">⇄ ${w.moves.length}</text></g>`});
   for(const [k,col] of [["reply_pct","var(--green)"],["bounce_pct","var(--red)"]]){
     const seg=pts.filter(p=>p[k]!=null);if(!seg.length)continue;
     svg+=`<polyline fill="none" stroke="${col}" stroke-width="2" points="${seg.map(p=>x(p.day).toFixed(1)+","+y(p[k]).toFixed(1)).join(" ")}"/>`+seg.map(p=>`<circle cx="${x(p.day)}" cy="${y(p[k])}" r="3" fill="${col}"><title>${p.day}: ${k==="reply_pct"?"reply":"bounce"} ${p[k]}% (${fmt(k==="reply_pct"?p.replied:p.bounced)} of ${fmt(p.sent)} sent)</title></circle>`).join("")}
