@@ -6,6 +6,10 @@ Clay (enrichment, email finding, verification) → EmailBison campaign. This app
 picking the next search and pressing Launch in PhantomBuster every day. Read README.md first for the
 user-facing picture; this file is the working knowledge behind it.
 
+**Before and after any change, read and update `CHANGES.md`** (standing decisions + change ledger). The
+`desk-changes` skill in `.claude/skills/` has the steps. The site is branded "RevOps"; "Scrape Desk" is
+now the name of its first tab.
+
 ## Layout
 
 - `app/main.py`: FastAPI routes, auth (Google @victig.com, or a shared `DESK_PASSWORD`, or none locally), `/api/state` for the page

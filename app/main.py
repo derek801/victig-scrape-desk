@@ -118,11 +118,11 @@ def logout(request: Request):
 
 
 LOGIN_FORM = """<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
-<title>Scrape Desk</title><link rel="icon" type="image/png" href="/favicon.png"><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500&family=Ubuntu:wght@700&display=swap" rel="stylesheet"><style>body{font:14px Poppins,system-ui,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#333}
+<title>RevOps</title><link rel="icon" type="image/png" href="/favicon.png"><link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500&family=Ubuntu:wght@700&display=swap" rel="stylesheet"><style>body{font:14px Poppins,system-ui,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#333}
 form{background:#fff;padding:30px 28px;border-radius:10px;border-top:4px solid #84B637;box-shadow:0 8px 30px #0005;display:grid;gap:12px;width:270px}
 img{height:34px;width:auto;justify-self:start;background:#333;padding:10px 14px;border-radius:6px;box-sizing:content-box}b{font:700 17px Ubuntu,system-ui,sans-serif;color:#333;letter-spacing:.04em}
 input,button{font:inherit;padding:9px 11px;border-radius:8px;border:1px solid #d6d6d6}input:focus{outline:2px solid #84B637;outline-offset:1px}button{background:#84B637;color:#242424;border:0;font-weight:700;text-transform:uppercase;letter-spacing:.06em;font-size:12.5px;cursor:pointer}button:hover{background:#A9CC73}
-.err{color:#b91c1c;margin:0}</style><form method=post action=/login><img src="/logo.png" alt="VICTIG"><b>Scrape Desk</b><!--err-->
+.err{color:#b91c1c;margin:0}</style><form method=post action=/login><img src="/logo.png" alt="VICTIG"><b>RevOps</b><!--err-->
 <input type=password name=password placeholder=Password autofocus><button>Sign in</button></form>"""
 
 
