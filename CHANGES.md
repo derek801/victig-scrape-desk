@@ -24,7 +24,7 @@ Rules that came from a person and still hold. Change one only when its owner say
 
 Newest first. One line per change: date, PR, who asked, what changed and why.
 
-- 2026-11-20 · Derek · Header renamed "Scrape Desk" → "RevOps"; tabs keep naming their page; browser tab
+- 2026-11-20 · #35 · Derek · Header renamed "Scrape Desk" → "RevOps"; tabs keep naming their page; browser tab
   title follows the open tab; sign-in page says RevOps. Why: the site now covers more than scraping.
   Also started this ledger.
 
