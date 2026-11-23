@@ -25,6 +25,7 @@ Rules that came from a person and still hold. Change one only when its owner say
 
 Newest first. One line per change: date, PR, who asked, what changed and why.
 
+- 2026-11-23 · #38 · Max · County map: hovering a county shows a card with the county and state, the date it was last scraped (and how many days ago) and its region, replacing the slow browser tooltip. `/api/coverage` now also returns the last-scraped timestamp. Why: the map only said "scraped N days ago" after a long hover delay and gave no date.
 - 2026-11-23 · #37 · Max · Health score and zone now come from lifetime numbers; the last 7-14 days is shown on the hover card for information, and only a bounce spike in it (2%+ caps at Danger, 5%+ retires) can change the zone. Why: victigbackgroundhelp.com (1.6% lifetime reply, 1.2% bounce, warm-up 96) fell to Danger at 53.8 on a quiet week, and a quiet week must not get a good domain swapped out for a bench domain. Standing rule: recent dips inform, they do not trigger rotation.
 - 2026-11-23 · #36 · Max · Inbox Health: hovering a domain's score, zone or reason shows a card with the signals behind it (the number behind each, its score, the points it cost) and what is needed to reach the next zone. Why: four domains sat in Danger and nobody could tell why.
 - 2026-11-20 · #35 · Derek · Header renamed "Scrape Desk" → "RevOps"; tabs keep naming their page; browser tab

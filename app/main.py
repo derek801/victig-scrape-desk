@@ -247,7 +247,7 @@ def coverage(request: Request):
     out = {}
     for c in store.q("SELECT fips, region_id, last_scraped, geo_id FROM counties"):
         days = (now - dt.datetime.fromisoformat(c["last_scraped"])).days if c["last_scraped"] else None
-        out[c["fips"]] = [c["region_id"], days, bool(c["geo_id"])]
+        out[c["fips"]] = [c["region_id"], days, bool(c["geo_id"]), c["last_scraped"]]
     return out
 
 
