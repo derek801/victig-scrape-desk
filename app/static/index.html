@@ -172,7 +172,10 @@ td.hv:hover,td.hv:focus-visible{background:#f4f8ea}
 #whyTip .recent .f{margin-top:4px}
 #whyTip tr.bad td{background:#fff6e5}
 #whyTip tr.bad td:last-child{color:var(--red);font-weight:600}
-@media (prefers-reduced-motion:reduce){#whyTip{transition:none;transform:none}}
+#ctyTip{position:fixed;z-index:60;background:#fff;color:var(--ink);border:1px solid #d6d6d6;border-top:3px solid var(--green-brand);border-radius:10px;box-shadow:0 10px 30px #0003;padding:8px 12px;font-size:12.5px;pointer-events:none;opacity:0;transform:translateY(4px);transition:opacity .12s ease-out,transform .12s ease-out;white-space:nowrap}
+#ctyTip.on{opacity:1;transform:none}
+#ctyTip b{font-size:13.5px}#ctyTip .f{color:var(--mute);font-size:11.5px;margin-top:2px}
+@media (prefers-reduced-motion:reduce){#whyTip,#ctyTip{transition:none;transform:none}}
 @media(max-width:1000px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2,.settings{grid-template-columns:1fr}.regions{grid-template-columns:repeat(2,1fr)}main{padding:14px 16px 40px}}
 @media(max-width:560px){.regions{grid-template-columns:1fr}.acct-table th:nth-child(5),.acct-table td:nth-child(5){display:none}}
 </style>
@@ -279,7 +282,7 @@ td.hv:hover,td.hv:focus-visible{background:#f4f8ea}
 <script>
 const BANDS={B:"1-10",C:"11-50",D:"51-200",E:"201-500",F:"501-1,000",G:"1,001-5,000",H:"5,001-10,000",I:"10,001+"};
 const ACOL={max:"#2563eb",blake:"#7c3aed",derek:"#d97706",dustin:"#059669",brent:"#dc2626",morgan:"#0891b2",stephen:"#64748b"};
-let S=null, logTab="events", mapDrawn=false, topo=null;
+let S=null, logTab="events", mapDrawn=false, topo=null, countyInfo=null;
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt=n=>(n??0).toLocaleString();
@@ -609,11 +612,23 @@ async function drawMap(){
   const fill=f=>{const c=cov[f.id];if(!c||!c[0])return "#f1f3f7";if(!c[2])return "#d4d7de";const days=c[1];const base=d3.color(colors[c[0]]);
     const op=days==null?.13:days<14?.95:days<45?.7:days<120?.45:.25;base.opacity=op;return base.formatRgb()};
   if(!mapDrawn){$("map").innerHTML=`<svg viewBox="0 0 ${W} ${H}"><g id="cty"></g><path id="sts" fill="none" stroke="#fff" stroke-width="1"></path></svg>`;mapDrawn=true;
-    d3.select("#cty").selectAll("path").data(topojson.feature(topo,topo.objects.counties).features).join("path").attr("d",path).attr("stroke","#fff").attr("stroke-width",.2).append("title");
+    d3.select("#cty").selectAll("path").data(topojson.feature(topo,topo.objects.counties).features).join("path").attr("d",path).attr("stroke","#fff").attr("stroke-width",.2);
     d3.select("#sts").attr("d",path(topojson.mesh(topo,topo.objects.states,(a,b)=>a!==b)))}
-  d3.select("#cty").selectAll("path").attr("fill",fill).select("title").text(f=>{const c=cov[f.id];return `${f.properties.name}: ${!c?"":c[1]==null?"not scraped yet":"scraped "+c[1]+" days ago"}`});
+  d3.select("#cty").selectAll("path").attr("fill",fill);
+  const states=Object.fromEntries(topojson.feature(topo,topo.objects.states).features.map(f=>[f.id,f.properties.name]));
+  countyInfo=f=>{const c=cov[f.id],reg=c&&S.regions.find(r=>r.id===c[0]);
+    const when=!c?"No data":!c[2]?"Not in LinkedIn's list, never scraped":c[3]?`Last scraped ${new Date(c[3]).toLocaleDateString([],{month:"short",day:"numeric",year:"numeric"})} (${c[1]===0?"today":c[1]===1?"yesterday":c[1]+" days ago"})`:"Not scraped yet";
+    return `<b>${esc(f.properties.name)}${states[String(f.id).slice(0,2)]?", "+esc(states[String(f.id).slice(0,2)]):""}</b><div class="f">${when}</div>${reg?`<div class="f">${esc(reg.name)}</div>`:""}`};
   $("legend").innerHTML=S.regions.map(r=>`<span><span class="dot" style="background:${r.color}"></span>${esc(r.name)}</span>`).join("")+`<span>pale = not scraped this cycle · solid = last 2 weeks</span>`;
 }
+(function(){const tip=document.createElement("div");tip.id="ctyTip";tip.setAttribute("role","tooltip");document.body.appendChild(tip);let cur=null;
+  const hide=()=>{cur=null;tip.classList.remove("on")};
+  document.addEventListener("mousemove",e=>{const el=e.target.closest&&e.target.closest("#cty path");if(!el||!countyInfo){if(cur)hide();return}
+    if(el!==cur){cur=el;tip.innerHTML=countyInfo(d3.select(el).datum())}
+    const w=tip.offsetWidth,h=tip.offsetHeight;let x=e.clientX+14,y=e.clientY+16;
+    if(x+w>innerWidth-8)x=e.clientX-w-14;if(y+h>innerHeight-8)y=e.clientY-h-14;
+    tip.style.left=Math.max(8,x)+"px";tip.style.top=Math.max(8,y)+"px";tip.classList.add("on")});
+  document.addEventListener("mouseleave",hide);addEventListener("scroll",hide,true)})();
 load();setInterval(()=>{if(!dlg.open)load()},30000);setInterval(()=>{if(TAB==='inbox')loadInbox()},120000);if(location.hash==='#inbox')showTab('inbox');
 </script>
 </body>
