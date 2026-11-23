@@ -18,12 +18,14 @@ Rules that came from a person and still hold. Change one only when its owner say
   (Derek, 2026-10-13; see CLAUDE.md)
 - **The site never posts to Chat or Slack.** Notifications go through the Make "RevOps Daily Connection
   Check", which reads `/api/check`. (Max, 2026-11-09, #13)
+- **Rotation reacts to lasting problems, not quiet weeks.** The score uses lifetime numbers; the recent window is information, except bounce spikes and hard-fails. (Max, 2026-11-23, #37)
 - **VICTIG brand look** (Poppins/Ubuntu, #333 + #84B637 green). Keep new UI in it. (Max, 2026-11-19, #33)
 
 ## Entries
 
 Newest first. One line per change: date, PR, who asked, what changed and why.
 
+- 2026-11-23 · #37 · Max · Health score and zone now come from lifetime numbers; the last 7-14 days is shown on the hover card for information, and only a bounce spike in it (2%+ caps at Danger, 5%+ retires) can change the zone. Why: victigbackgroundhelp.com (1.6% lifetime reply, 1.2% bounce, warm-up 96) fell to Danger at 53.8 on a quiet week, and a quiet week must not get a good domain swapped out for a bench domain. Standing rule: recent dips inform, they do not trigger rotation.
 - 2026-11-23 · #36 · Max · Inbox Health: hovering a domain's score, zone or reason shows a card with the signals behind it (the number behind each, its score, the points it cost) and what is needed to reach the next zone. Why: four domains sat in Danger and nobody could tell why.
 - 2026-11-20 · #35 · Derek · Header renamed "Scrape Desk" → "RevOps"; tabs keep naming their page; browser tab
   title follows the open tab; sign-in page says RevOps. Why: the site now covers more than scraping.

@@ -168,6 +168,8 @@ td.hv:hover,td.hv:focus-visible{background:#f4f8ea}
 #whyTip tr:last-child td{border-bottom:0}
 #whyTip .n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 #whyTip .f{color:var(--mute);font-size:11.5px;font-weight:400}
+#whyTip .recent{margin:8px 0 6px;padding:8px 10px;background:var(--soft);border-radius:8px}
+#whyTip .recent .f{margin-top:4px}
 #whyTip tr.bad td{background:#fff6e5}
 #whyTip tr.bad td:last-child{color:var(--red);font-weight:600}
 @media (prefers-reduced-motion:reduce){#whyTip{transition:none;transform:none}}
@@ -456,12 +458,15 @@ function trendCell(x){const t=x.trend;if(!t)return `<span class="muted small">bu
 let whyData={};
 const SIGNALS={reply:"Reply rate",bounce:"Bounce rate",warmup:"Warm-up score",auth:"SPF / DKIM / DMARC / MX",volume:"Volume vs daily limit",positive:"Positive replies",complaints:"Spam complaints",blacklist:"Blacklists"};
 function signalFact(k,h){const i=h.inputs||{};
-  if(k==="reply")return i.reply_pct==null?"–":`${i.reply_pct}% (${fmt(i.replied)} of ${fmt(i.sent)} sent)${i.reply_goal?`, goal ${i.reply_goal}%+`:""}`;
-  if(k==="bounce")return i.bounce_pct==null?"–":`${i.bounce_pct}% (${fmt(i.bounced)} of ${fmt(i.sent)} sent)`;
+  if(k==="reply")return i.reply_pct==null?"–":`${i.reply_pct}% lifetime (${fmt(i.replied)} of ${fmt(i.sent)} sent)${i.reply_goal?`, goal ${i.reply_goal}%+`:""}`;
+  if(k==="bounce")return i.bounce_pct==null?"–":`${i.bounce_pct}% lifetime (${fmt(i.bounced)} of ${fmt(i.sent)} sent)`;
   if(k==="warmup")return i.warmup==null?"–":`${Math.round(i.warmup)} average, mailboxes with warm-up on`;
   if(k==="auth"){const d=i.dns||{},miss=["spf","dkim","dmarc","mx"].filter(x=>!d[x]);return miss.length?`missing ${miss.map(x=>x.toUpperCase()).join(", ")}`:"all four present"}
   if(k==="volume")return i.util==null?"–":`${Math.round(i.util*100)}% of the daily limit`;
   return ""}
+function recentHtml(h){const r=h.recent;if(!r)return `<p class="f">Recent days: not enough sends in the last 7-14 days to show.</p>`;
+  const spike=r.bounce_pct>=2;
+  return `<div class="recent"><b>Last ${r.basis} (for information)</b><br>Reply ${r.reply_pct}% (${fmt(r.replied)} of ${fmt(r.sent)} sent) · Bounce <span class="${spike?"att":""}">${r.bounce_pct}%</span> (${fmt(r.bounced)})<div class="f">Replies in recent days do not move the zone (replies arrive days after a send). A bounce rate of 2%+ caps it at Danger, 5%+ sends it to Retire.</div></div>`}
 function whyHtml(dom){
   const h=whyData[dom];if(!h)return"";
   const zn={healthy:"Healthy",watch:"Watch",danger:"Danger",retire:"Retire",new:"Too few sends"}[h.zone];
@@ -478,7 +483,8 @@ function whyHtml(dom){
   return `<b>${esc(dom)}</b> <span class="pill ${h.zone}">${zn}</span> <b class="big">${h.score}</b>
     <p>${head}</p>
     <table><tr><th>Signal</th><th class="n">Score /100</th><th class="n">Points lost</th></tr>${tr}</table>
-    <p class="f">Window: ${h.basis==="lifetime"?"lifetime":"last "+(h.basis||"?")} · ${h.coverage}% of the weight measured.<br>Not scored: positive replies, spam complaints, blacklists.</p>`}
+    ${recentHtml(h)}
+    <p class="f">The score uses lifetime numbers, so a quiet week cannot move a domain. ${h.coverage}% of the weight measured.<br>Not scored: positive replies, spam complaints, blacklists.</p>`}
 (function(){
   const tip=document.createElement("div");tip.id="whyTip";tip.setAttribute("role","tooltip");tip.hidden=true;document.body.appendChild(tip);
   let cur=null;
@@ -526,7 +532,7 @@ function renderInbox(){
       <td>${trendCell(x)}</td><td>${x.warmup} <span class="muted small">warmup on</span></td><td>${esc(x.ht_status||"–")}</td><td class="muted small">${esc(x.created||"")}</td></tr>`}).join("");
   $("inboxTable").innerHTML=`<tr><th>Domain</th><th>Score</th><th>Zone</th><th>Top drag / reason</th><th>Score trend (7d)</th><th>Reply rate</th><th>Replies / sent</th><th>Lifetime bounce</th><th>Bounced / sent</th><th>Mailboxes connected</th><th>Trend (pts)</th><th>Warmup</th><th>Hypertide status</th><th>Ordered</th></tr>${rows||`<tr><td colspan="14" class="muted">Nothing matches.</td></tr>`}`;
   const w=d.weights||{};
-  $("inboxFoot").textContent=`Health score 0-100 = weighted average of what we can measure (${Object.entries(w).map(([k,v])=>k+" "+v).join(", ")}); signals we cannot read yet (spam complaints, blacklists) are left out, not counted as passes. Reply rate is judged against the team's 1% goal. Positive replies are not scored (they depend on the list and offer, not the domain), and the warm-up score only counts for mailboxes that still have warm-up switched on. Hard-fails (complaints 0.3%+, no SPF and DMARC, blacklist, 5%+ bounce in the window) go straight to Retire; 2%+ bounce caps at Danger. Windows: last 7 days, then 14, then lifetime, and each needs ${d.window_min_sends||200}+ sends. Hover a domain's score, zone or reason to see exactly why it is there. Reply rate = replies ÷ sends for the whole domain (the headline signal: lower is worse; judged once it has ${d.reply_min_sends}+ sends; under ${d.reply_warn_pct}% warning, under ${d.reply_crit_pct}% critical). Sorted worst score first. Lifetime bounce = bounced ÷ sent, judged once it has ${d.min_sends}+ sends. Trend = change in the lifetime rate over about 7 days, from a daily snapshot (it builds up from the first sync). Read-only: nothing is paused, bought or swapped from this tab yet.`+(d.hypertide?"":" (Hypertide key not set: status column empty.)");
+  $("inboxFoot").textContent=`Health score 0-100 = weighted average of what we can measure (${Object.entries(w).map(([k,v])=>k+" "+v).join(", ")}); signals we cannot read yet (spam complaints, blacklists) are left out, not counted as passes. Reply rate is judged against the team's 1% goal. Positive replies are not scored (they depend on the list and offer, not the domain), and the warm-up score only counts for mailboxes that still have warm-up switched on. Hard-fails (complaints 0.3%+, no SPF and DMARC, blacklist, 5%+ recent bounce) go straight to Retire; 2%+ recent bounce caps at Danger. The score and zone use lifetime numbers, so a quiet week cannot move a domain or trigger a swap; the last 7-14 days (needs ${d.window_min_sends||200}+ sends) is shown on hover, and only a bounce spike there (2%+ caps at Danger, 5%+ retires) changes the zone. Hover a domain's score, zone or reason to see exactly why it is there. Reply rate = replies ÷ sends for the whole domain (the headline signal: lower is worse; judged once it has ${d.reply_min_sends}+ sends; under ${d.reply_warn_pct}% warning, under ${d.reply_crit_pct}% critical). Sorted worst score first. Lifetime bounce = bounced ÷ sent, judged once it has ${d.min_sends}+ sends. Trend = change in the lifetime rate over about 7 days, from a daily snapshot (it builds up from the first sync). Read-only: nothing is paused, bought or swapped from this tab yet.`+(d.hypertide?"":" (Hypertide key not set: status column empty.)");
 }
 function renderChart(){
   const keys=S.accounts.map(a=>a.key), days=[];

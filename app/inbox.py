@@ -347,9 +347,12 @@ def _health(doms, s):
             d["health"] = {"score": None, "zone": "new", "basis": None, "coverage": 0, "drag": None, "factors": {},
                            "hard_fail": [], "capped": []}
             continue
-        m = w or {k: d[k] or 0 for k in ("sent", "bounced", "replied", "interested")}
-        util = m["sent"] / (d["limit_sum"] * w["days"]) if w and d["limit_sum"] else None
-        d["health"] = health.score_domain({**m, "basis": basis, "mailboxes": d["mailboxes"], "util": util,
+        # the score and zone come from LIFETIME numbers, so a quiet week of replies cannot move a domain (and so cannot trigger
+        # a swap); the recent window rides along for the hover card, and only a bounce spike in it can move the zone
+        m = {k: d[k] or 0 for k in ("sent", "bounced", "replied", "interested")}
+        util = w["sent"] / (d["limit_sum"] * w["days"]) if w and d["limit_sum"] else None
+        recent = {"basis": basis, "sent": w["sent"], "bounced": w["bounced"], "replied": w["replied"]} if w else None
+        d["health"] = health.score_domain({**m, "recent": recent, "basis": "lifetime", "mailboxes": d["mailboxes"], "util": util,
                                            "warmup": d["warmup_avg"], "dns": dns.get(d["domain"])},
                                           fleet, s.get("health_weights"))
         d["dns"] = {k: dns[d["domain"]].get(k) for k in ("spf", "dkim", "dmarc", "mx", "error")} if d["domain"] in dns else None
