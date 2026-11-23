@@ -803,4 +803,11 @@ check(_o["w.com"]["warmup_avg"] is None and _o["x.com"]["warmup_avg"] == 90, "wa
 ri = health.score_domain({**base, "replied": 5}, {**FL, "reply_good_pct": 1.0})
 check(ri["inputs"]["reply_pct"] == 0.5 and ri["inputs"]["sent"] == 1000 and ri["inputs"]["reply_goal"] == 1.0 and ri["inputs"]["total_weight"] > 0,
       "the score carries the raw numbers it was built from")
+
+# replies lag sends: the reply rate can come from a longer window than the bounce rate
+short = health.score_domain({**base, "sent": 500, "replied": 1, "basis": "7d"}, {**FL, "reply_good_pct": 1.0})
+longer = health.score_domain({**base, "sent": 500, "replied": 1, "basis": "7d", "reply_sent": 4800, "reply_replied": 78, "reply_basis": "lifetime"}, {**FL, "reply_good_pct": 1.0})
+check(short["factors"]["reply"]["score"] < 40 and longer["factors"]["reply"]["score"] == 100 and longer["zone"] == "healthy"
+      and longer["inputs"]["reply_basis"] == "lifetime" and longer["inputs"]["reply_sent"] == 4800,
+      "a quiet week of replies does not sink a domain whose longer reply rate is good; bounce still uses the short window")
 print("all checks passed")

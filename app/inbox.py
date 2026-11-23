@@ -342,6 +342,7 @@ def _health(doms, s):
     for d in doms:
         rows = hist.get(d["domain"], [])
         w7, w14 = _window(rows, d, 7, s), _window(rows, d, 14, s)
+        w30 = _window(rows, d, 30, s)
         w, basis = (w7, "7d") if w7 else (w14, "14d") if w14 else (None, "lifetime")
         if w is None and d["sent"] < s["inbox_min_sends"]:
             d["health"] = {"score": None, "zone": "new", "basis": None, "coverage": 0, "drag": None, "factors": {},
@@ -349,7 +350,10 @@ def _health(doms, s):
             continue
         m = w or {k: d[k] or 0 for k in ("sent", "bounced", "replied", "interested")}
         util = m["sent"] / (d["limit_sum"] * w["days"]) if w and d["limit_sum"] else None
-        d["health"] = health.score_domain({**m, "basis": basis, "mailboxes": d["mailboxes"], "util": util,
+        # replies arrive days after the send, so the reply rate is read over ~30 days (else lifetime), not the bounce window
+        rep = ({"reply_sent": w30["sent"], "reply_replied": w30["replied"], "reply_basis": "30d"} if w30 else
+               {"reply_sent": d["sent"] or 0, "reply_replied": d["replied"] or 0, "reply_basis": "lifetime"})
+        d["health"] = health.score_domain({**m, **rep, "basis": basis, "mailboxes": d["mailboxes"], "util": util,
                                            "warmup": d["warmup_avg"], "dns": dns.get(d["domain"])},
                                           fleet, s.get("health_weights"))
         d["dns"] = {k: dns[d["domain"]].get(k) for k in ("spf", "dkim", "dmarc", "mx", "error")} if d["domain"] in dns else None

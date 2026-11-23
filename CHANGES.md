@@ -24,6 +24,7 @@ Rules that came from a person and still hold. Change one only when its owner say
 
 Newest first. One line per change: date, PR, who asked, what changed and why.
 
+- 2026-11-23 · #37 · Max · Health score: the reply rate is now read over about 30 days (lifetime if there is not that much history) instead of the last 7 or 14; bounces keep the short window. Why: replies arrive days after a send, so a short window undercounted them and put victigbackgroundhelp.com (1.6% lifetime reply, 1.2% bounce, warm-up 96) in Danger at 53.8.
 - 2026-11-23 · #36 · Max · Inbox Health: hovering a domain's score, zone or reason shows a card with the signals behind it (the number behind each, its score, the points it cost) and what is needed to reach the next zone. Why: four domains sat in Danger and nobody could tell why.
 - 2026-11-20 · #35 · Derek · Header renamed "Scrape Desk" → "RevOps"; tabs keep naming their page; browser tab
   title follows the open tab; sign-in page says RevOps. Why: the site now covers more than scraping.

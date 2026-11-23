@@ -69,12 +69,17 @@ def score_domain(m, fleet, weights=None):
     sent = m.get("sent") or 0
     sub = {}
     rr = None
-    if sent > 0:
-        rr = (m.get("replied") or 0) / sent * 100
+    # replies trickle in days after the send, so a short window undercounts them: the reply rate may come from a longer
+    # window (reply_sent / reply_replied / reply_basis) than the bounce rate, which bounces back within minutes
+    rsent = m.get("reply_sent") if m.get("reply_sent") is not None else sent
+    rrep = m.get("reply_replied") if m.get("reply_sent") is not None else (m.get("replied") or 0)
+    if rsent > 0:
+        rr = rrep / rsent * 100
         if fleet.get("reply_good_pct"):             # the team's floor: 1% or more is good (0 at a quarter of it)
             sub["reply"] = lin(rr, fleet["reply_good_pct"] * 0.25, fleet["reply_good_pct"])
         elif fleet.get("reply_rate"):
             sub["reply"] = lin(rr / fleet["reply_rate"], 0.25, 1.0)
+    if sent > 0:
         if fleet.get("positive_rate"):
             sub["positive"] = lin((m.get("interested") or 0) / sent * 100 / fleet["positive_rate"], 0.25, 1.0)
         bounce = (m.get("bounced") or 0) / sent * 100
@@ -126,7 +131,8 @@ def score_domain(m, fleet, weights=None):
             "factors": {k: {"score": round(v), "weight": w[k]} for k, v in sub.items()},
             "hard_fail": hard, "capped": capped,
             # the raw numbers the score was built from, so the page can show them on hover
-            "inputs": {"sent": sent, "replied": m.get("replied") or 0, "bounced": m.get("bounced") or 0,
-                       "reply_pct": round(rr, 2) if sent > 0 else None, "bounce_pct": round(bounce, 2) if bounce is not None else None,
+            "inputs": {"sent": sent, "replied": rrep, "reply_sent": rsent, "reply_basis": m.get("reply_basis") or m.get("basis"),
+                       "bounced": m.get("bounced") or 0,
+                       "reply_pct": round(rr, 2) if rr is not None else None, "bounce_pct": round(bounce, 2) if bounce is not None else None,
                        "reply_goal": fleet.get("reply_good_pct"), "warmup": m.get("warmup"), "dns": m.get("dns"),
                        "util": m.get("util"), "mailboxes": m.get("mailboxes"), "total_weight": total_w}}

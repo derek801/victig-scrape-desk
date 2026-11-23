@@ -456,8 +456,8 @@ function trendCell(x){const t=x.trend;if(!t)return `<span class="muted small">bu
 let whyData={};
 const SIGNALS={reply:"Reply rate",bounce:"Bounce rate",warmup:"Warm-up score",auth:"SPF / DKIM / DMARC / MX",volume:"Volume vs daily limit",positive:"Positive replies",complaints:"Spam complaints",blacklist:"Blacklists"};
 function signalFact(k,h){const i=h.inputs||{};
-  if(k==="reply")return i.reply_pct==null?"–":`${i.reply_pct}% (${fmt(i.replied)} of ${fmt(i.sent)} sent)${i.reply_goal?`, goal ${i.reply_goal}%+`:""}`;
-  if(k==="bounce")return i.bounce_pct==null?"–":`${i.bounce_pct}% (${fmt(i.bounced)} of ${fmt(i.sent)} sent)`;
+  if(k==="reply")return i.reply_pct==null?"–":`${i.reply_pct}% (${fmt(i.replied)} of ${fmt(i.reply_sent??i.sent)} sent, ${i.reply_basis==="lifetime"?"lifetime":"last "+(i.reply_basis||"?")})${i.reply_goal?`, goal ${i.reply_goal}%+`:""}`;
+  if(k==="bounce")return i.bounce_pct==null?"–":`${i.bounce_pct}% (${fmt(i.bounced)} of ${fmt(i.sent)} sent, ${h.basis==="lifetime"?"lifetime":"last "+(h.basis||"?")})`;
   if(k==="warmup")return i.warmup==null?"–":`${Math.round(i.warmup)} average, mailboxes with warm-up on`;
   if(k==="auth"){const d=i.dns||{},miss=["spf","dkim","dmarc","mx"].filter(x=>!d[x]);return miss.length?`missing ${miss.map(x=>x.toUpperCase()).join(", ")}`:"all four present"}
   if(k==="volume")return i.util==null?"–":`${Math.round(i.util*100)}% of the daily limit`;
@@ -478,7 +478,7 @@ function whyHtml(dom){
   return `<b>${esc(dom)}</b> <span class="pill ${h.zone}">${zn}</span> <b class="big">${h.score}</b>
     <p>${head}</p>
     <table><tr><th>Signal</th><th class="n">Score /100</th><th class="n">Points lost</th></tr>${tr}</table>
-    <p class="f">Window: ${h.basis==="lifetime"?"lifetime":"last "+(h.basis||"?")} · ${h.coverage}% of the weight measured.<br>Not scored: positive replies, spam complaints, blacklists.</p>`}
+    <p class="f">Bounce window: ${h.basis==="lifetime"?"lifetime":"last "+(h.basis||"?")}; reply window: ${(h.inputs&&h.inputs.reply_basis)==="lifetime"?"lifetime":"last "+((h.inputs&&h.inputs.reply_basis)||"?")} (replies arrive days after the send). ${h.coverage}% of the weight measured.<br>Not scored: positive replies, spam complaints, blacklists.</p>`}
 (function(){
   const tip=document.createElement("div");tip.id="whyTip";tip.setAttribute("role","tooltip");tip.hidden=true;document.body.appendChild(tip);
   let cur=null;
