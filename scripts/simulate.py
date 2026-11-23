@@ -798,4 +798,9 @@ store.x("DELETE FROM inbox_senders")
 store.x("INSERT INTO inbox_senders(id,email,domain,status,warmup,daily_limit,sent,bounced,replied,interested,warmup_score) VALUES (1,'a@w.com','w.com','Connected',0,5,100,1,2,0,0),(2,'b@w.com','w.com','Connected',0,5,100,1,2,0,0),(3,'c@x.com','x.com','Connected',1,5,100,1,2,0,90)")
 _o = {d["domain"]: d for d in inbox.overview()["domains"]}
 check(_o["w.com"]["warmup_avg"] is None and _o["x.com"]["warmup_avg"] == 90, "warm-up score is averaged only over mailboxes with warm-up on")
+
+# the hover card's numbers travel with the score
+ri = health.score_domain({**base, "replied": 5}, {**FL, "reply_good_pct": 1.0})
+check(ri["inputs"]["reply_pct"] == 0.5 and ri["inputs"]["sent"] == 1000 and ri["inputs"]["reply_goal"] == 1.0 and ri["inputs"]["total_weight"] > 0,
+      "the score carries the raw numbers it was built from")
 print("all checks passed")
