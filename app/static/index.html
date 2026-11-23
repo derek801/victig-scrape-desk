@@ -106,6 +106,11 @@ header{position:sticky;top:0;z-index:30}
 main{max-width:1280px;gap:20px}
 main>*,.grid2>*{min-width:0}
 .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.shell{display:grid;grid-template-columns:200px minmax(0,1fr);gap:20px;align-items:start}
+.col{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;min-width:0}
+.kpis.side{grid-template-columns:1fr;gap:10px;position:sticky;top:76px}
+.kpis.side .kpi{padding:12px 16px}
+.kpis.side .kpi .v{font-size:26px}
 #inboxKpis .kpi[data-i="1"]{border-left-color:var(--green-brand)}
 #inboxKpis .kpi[data-i="2"]{border-left-color:var(--orange)}
 #inboxKpis .kpi[data-i="3"]{border-left-color:var(--orange-shade)}
@@ -133,10 +138,10 @@ details.fold.inner>summary{font-weight:600;font-size:14px;font-family:var(--head
    Entrances use opacity + 8px of travel with the strong ease-out curve; reduced motion keeps the fade only. */
 @keyframes rise{from{opacity:0;transform:translateY(8px)}}
 @keyframes fade{from{opacity:0}}
-main:not([hidden])>*{animation:rise .32s cubic-bezier(.23,1,.32,1) backwards}
-main:not([hidden])>*:nth-child(2){animation-delay:40ms}main:not([hidden])>*:nth-child(3){animation-delay:80ms}
-main:not([hidden])>*:nth-child(4){animation-delay:120ms}main:not([hidden])>*:nth-child(5){animation-delay:160ms}
-main:not([hidden])>*:nth-child(n+6){animation-delay:200ms}
+.col>*,.kpis.side{animation:rise .32s cubic-bezier(.23,1,.32,1) backwards}
+.col>*:nth-child(2){animation-delay:40ms}.col>*:nth-child(3){animation-delay:80ms}
+.col>*:nth-child(4){animation-delay:120ms}.col>*:nth-child(5){animation-delay:160ms}
+.col>*:nth-child(n+6){animation-delay:200ms}
 dialog{transition:opacity .2s cubic-bezier(.23,1,.32,1),transform .2s cubic-bezier(.23,1,.32,1),overlay .2s allow-discrete,display .2s allow-discrete}
 dialog:not([open]){opacity:0;transform:scale(.96)}
 dialog[open]{opacity:1;transform:none}
@@ -176,7 +181,7 @@ td.hv:hover,td.hv:focus-visible{background:#f4f8ea}
 #ctyTip.on{opacity:1;transform:none}
 #ctyTip b{font-size:13.5px}#ctyTip .f{color:var(--mute);font-size:11.5px;margin-top:2px}
 @media (prefers-reduced-motion:reduce){#whyTip,#ctyTip{transition:none;transform:none}}
-@media(max-width:1000px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2,.settings{grid-template-columns:1fr}.regions{grid-template-columns:repeat(2,1fr)}main{padding:14px 16px 40px}}
+@media(max-width:1000px){.shell{grid-template-columns:1fr}.kpis.side{position:static;grid-template-columns:repeat(2,1fr)}.kpis{grid-template-columns:repeat(2,1fr)}.grid2,.settings{grid-template-columns:1fr}.regions{grid-template-columns:repeat(2,1fr)}main{padding:14px 16px 40px}}
 @media(max-width:560px){.regions{grid-template-columns:1fr}.acct-table th:nth-child(5),.acct-table td:nth-child(5){display:none}}
 </style>
 </head>
@@ -191,19 +196,20 @@ td.hv:hover,td.hv:focus-visible{background:#f4f8ea}
   <button id="btnPause" class="deskonly"></button>
 </header>
 <main id="inboxMain" hidden>
+ <div class="shell">
+  <aside class="kpis side" id="inboxKpis"></aside>
+  <div class="col">
   <div id="inboxBanners" style="display:grid;gap:8px"></div>
-  <div class="kpis" id="inboxKpis"></div>
   <section class="card">
     <h2>Reply rate &amp; bounce rate by day <small id="trendNote"></small></h2>
     <div id="trendChart" style="width:100%"></div>
     <div id="trendSwaps" class="small" style="margin-top:6px"></div>
   </section>
-  <section class="card">
-    <h2>Sending domains <small id="inboxNote"></small></h2>
+  <details class="card fold" id="domainsFold"><summary><h2>Sending domains <small id="inboxNote"></small></h2></summary>
     <div class="filters" id="inboxFilters"></div>
     <div style="overflow-x:auto"><table id="inboxTable"></table></div>
     <div class="muted small" style="margin-top:8px" id="inboxFoot"></div>
-  </section>
+  </details>
   <section class="card">
     <h2>Bench &amp; rotation <small id="rotNote"></small></h2>
     <div class="filters" style="margin-bottom:8px"><button onclick="rotTest('simulate')" id="btnSim">Run test (simulation)</button><button onclick="rotTest('dry')" id="btnDry">Check now (dry run on real data)</button><span class="muted small" id="rotTestNote">The simulation uses fake data and changes nothing. Check now reads your real Bison and Hypertide but only plans; nothing is swapped or bought.</span></div>
@@ -217,10 +223,14 @@ td.hv:hover,td.hv:focus-visible{background:#f4f8ea}
     <details class="fold inner"><summary>Audit log <small class="muted">latest 3 checks; older ones in the dropdown</small></summary>
     <div id="rotLog"></div></details>
   </section>
+  </div>
+ </div>
 </main>
 <main id="deskMain">
+ <div class="shell">
+  <aside class="kpis side" id="kpis"></aside>
+  <div class="col">
   <div id="banners" style="display:grid;gap:8px"></div>
-  <div class="kpis" id="kpis"></div>
 
   <section class="card">
     <h2>Accounts <small id="windowNote"></small></h2>
@@ -275,6 +285,8 @@ td.hv:hover,td.hv:focus-visible{background:#f4f8ea}
     <div style="overflow-x:auto"><table id="clay"></table></div>
     <div class="muted small" id="clayNote" style="margin-top:8px">Rows are an estimate: the count you set from Clay, plus every profile scraped since. Re-set it from Clay now and then to correct drift (repeats Clay skips, rows added or deleted by hand).</div>
   </section>
+  </div>
+ </div>
 </main>
 
 <dialog id="dlg"><div class="hd"><b id="dlgTitle"></b><button onclick="dlg.close()">Close</button></div><div class="bd" id="dlgBody"></div></dialog>
