@@ -61,20 +61,19 @@ def auth_points(dns):
 
 
 def score_domain(m, fleet, weights=None):
-    """m: sent, bounced, replied, interested (all over the same window), basis ('7d'/'14d'/'lifetime'), mailboxes,
+    """m: sent, bounced, replied, interested (all over the same window: the score is built from LIFETIME numbers, so a
+    quiet week cannot move a domain between zones), basis ('lifetime'), mailboxes,
     warmup (average warm-up score or None), dns (dict or None), util (sends vs daily limit, or None),
-    complaint_pct / blacklisted (None until we can read them).
+    complaint_pct / blacklisted (None until we can read them),
+    recent (optional): {basis, sent, bounced, replied}: the last 7/14 days. Shown for information; only a bounce spike in it
+    (the pause / retire lines below) can move the zone, because that is a pressing problem, not a dip in replies.
     fleet: reply_rate, positive_rate (percent, whole fleet)."""
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
     sent = m.get("sent") or 0
     sub = {}
     rr = None
-    # replies trickle in days after the send, so a short window undercounts them: the reply rate may come from a longer
-    # window (reply_sent / reply_replied / reply_basis) than the bounce rate, which bounces back within minutes
-    rsent = m.get("reply_sent") if m.get("reply_sent") is not None else sent
-    rrep = m.get("reply_replied") if m.get("reply_sent") is not None else (m.get("replied") or 0)
-    if rsent > 0:
-        rr = rrep / rsent * 100
+    if sent > 0:
+        rr = (m.get("replied") or 0) / sent * 100
         if fleet.get("reply_good_pct"):             # the team's floor: 1% or more is good (0 at a quarter of it)
             sub["reply"] = lin(rr, fleet["reply_good_pct"] * 0.25, fleet["reply_good_pct"])
         elif fleet.get("reply_rate"):
@@ -115,11 +114,14 @@ def score_domain(m, fleet, weights=None):
         hard.append("listed on a major blacklist")
     if dns and not dns.get("error") and not dns.get("spf") and not dns.get("dmarc"):
         hard.append("no SPF and no DMARC record")
-    if bounce is not None and sent >= MIN_PAUSE_SENDS and m.get("basis") != "lifetime":
-        if bounce >= RETIRE_BOUNCE_PCT:
-            hard.append(f"bounce rate {bounce:.1f}% over {m.get('basis')}")
-        elif bounce >= PAUSE_BOUNCE_PCT:
-            capped.append(f"bounce rate {bounce:.1f}% over {m.get('basis')}")
+    rec = m.get("recent") or ({"basis": m.get("basis"), "sent": sent, "bounced": m.get("bounced") or 0, "replied": m.get("replied") or 0}
+                              if m.get("basis") != "lifetime" else None)
+    rbounce = rec["bounced"] / rec["sent"] * 100 if rec and rec.get("sent") else None
+    if rbounce is not None and rec["sent"] >= MIN_PAUSE_SENDS:
+        if rbounce >= RETIRE_BOUNCE_PCT:
+            hard.append(f"bounce rate {rbounce:.1f}% over {rec.get('basis')}")
+        elif rbounce >= PAUSE_BOUNCE_PCT:
+            capped.append(f"bounce rate {rbounce:.1f}% over {rec.get('basis')}")
     if capped:
         score = min(score, ZONES[1][1] - 0.1)        # just under the Watch floor = top of Danger
     score = round(score, 1)
@@ -131,8 +133,10 @@ def score_domain(m, fleet, weights=None):
             "factors": {k: {"score": round(v), "weight": w[k]} for k, v in sub.items()},
             "hard_fail": hard, "capped": capped,
             # the raw numbers the score was built from, so the page can show them on hover
-            "inputs": {"sent": sent, "replied": rrep, "reply_sent": rsent, "reply_basis": m.get("reply_basis") or m.get("basis"),
-                       "bounced": m.get("bounced") or 0,
+            "recent": ({"basis": rec.get("basis"), "sent": rec["sent"], "replied": rec.get("replied") or 0, "bounced": rec.get("bounced") or 0,
+                        "reply_pct": round((rec.get("replied") or 0) / rec["sent"] * 100, 2),
+                        "bounce_pct": round(rbounce, 2)} if rec and rec.get("sent") else None),
+            "inputs": {"sent": sent, "replied": m.get("replied") or 0, "bounced": m.get("bounced") or 0,
                        "reply_pct": round(rr, 2) if rr is not None else None, "bounce_pct": round(bounce, 2) if bounce is not None else None,
                        "reply_goal": fleet.get("reply_good_pct"), "warmup": m.get("warmup"), "dns": m.get("dns"),
                        "util": m.get("util"), "mailboxes": m.get("mailboxes"), "total_weight": total_w}}

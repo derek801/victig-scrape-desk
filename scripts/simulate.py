@@ -379,7 +379,7 @@ store.xmany("INSERT INTO inbox_history(day,domain,sent,bounced,mailboxes,connect
             [(old_day, "bad.com", 1000, 20, 10, 10, 0, 0, 60.0), (old_day, "good.com", 2200, 22, 11, 10, 44, 0, 90.0)])
 inbox.sync()
 by = {d["domain"]: d for d in inbox.overview()["domains"]}
-check(by["bad.com"]["health"]["basis"] == "7d" and by["bad.com"]["health"]["zone"] == "retire"
+check(by["bad.com"]["health"]["recent"]["basis"] == "7d" and by["bad.com"]["health"]["zone"] == "retire"
       and any("bounce rate" in r for r in by["bad.com"]["health"]["hard_fail"]), "7-day window: 6% bounce over 1,000 sends is a hard-fail to Retire")
 check(by["good.com"]["health"]["basis"] == "lifetime" and by["bad.com"]["health"]["trend"] is not None
       and by["bad.com"]["health"]["trend"] < 0, "too few sends in the window falls back to lifetime; score trend vs a week ago")
@@ -804,10 +804,11 @@ ri = health.score_domain({**base, "replied": 5}, {**FL, "reply_good_pct": 1.0})
 check(ri["inputs"]["reply_pct"] == 0.5 and ri["inputs"]["sent"] == 1000 and ri["inputs"]["reply_goal"] == 1.0 and ri["inputs"]["total_weight"] > 0,
       "the score carries the raw numbers it was built from")
 
-# replies lag sends: the reply rate can come from a longer window than the bounce rate
-short = health.score_domain({**base, "sent": 500, "replied": 1, "basis": "7d"}, {**FL, "reply_good_pct": 1.0})
-longer = health.score_domain({**base, "sent": 500, "replied": 1, "basis": "7d", "reply_sent": 4800, "reply_replied": 78, "reply_basis": "lifetime"}, {**FL, "reply_good_pct": 1.0})
-check(short["factors"]["reply"]["score"] < 40 and longer["factors"]["reply"]["score"] == 100 and longer["zone"] == "healthy"
-      and longer["inputs"]["reply_basis"] == "lifetime" and longer["inputs"]["reply_sent"] == 4800,
-      "a quiet week of replies does not sink a domain whose longer reply rate is good; bounce still uses the short window")
+# recent days are information: a quiet week cannot move the zone, a bounce spike can
+good = {**base, "sent": 4800, "replied": 78, "bounced": 57, "basis": "lifetime"}
+quiet = health.score_domain({**good, "recent": {"basis": "7d", "sent": 1700, "replied": 5, "bounced": 20}}, {**FL, "reply_good_pct": 1.0})
+check(quiet["zone"] == "healthy" and quiet["recent"]["reply_pct"] == 0.29 and quiet["inputs"]["reply_pct"] == 1.62,
+      "a quiet week of replies does not move a domain with a good lifetime reply rate; the week is still reported")
+spike = health.score_domain({**good, "recent": {"basis": "7d", "sent": 1700, "replied": 30, "bounced": 40}}, {**FL, "reply_good_pct": 1.0})
+check(spike["zone"] == "danger" and spike["capped"], "a bounce spike in the recent window still caps the domain at Danger")
 print("all checks passed")
