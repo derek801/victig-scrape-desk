@@ -68,6 +68,7 @@ def score_domain(m, fleet, weights=None):
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
     sent = m.get("sent") or 0
     sub = {}
+    rr = None
     if sent > 0:
         rr = (m.get("replied") or 0) / sent * 100
         if fleet.get("reply_good_pct"):             # the team's floor: 1% or more is good (0 at a quarter of it)
@@ -123,4 +124,9 @@ def score_domain(m, fleet, weights=None):
             "coverage": round(total_w / sum(w.values()) * 100),
             "drag": {"key": top, "label": LABELS[top], "points": round(lost[top], 1)} if lost[top] >= 1 else None,
             "factors": {k: {"score": round(v), "weight": w[k]} for k, v in sub.items()},
-            "hard_fail": hard, "capped": capped}
+            "hard_fail": hard, "capped": capped,
+            # the raw numbers the score was built from, so the page can show them on hover
+            "inputs": {"sent": sent, "replied": m.get("replied") or 0, "bounced": m.get("bounced") or 0,
+                       "reply_pct": round(rr, 2) if sent > 0 else None, "bounce_pct": round(bounce, 2) if bounce is not None else None,
+                       "reply_goal": fleet.get("reply_good_pct"), "warmup": m.get("warmup"), "dns": m.get("dns"),
+                       "util": m.get("util"), "mailboxes": m.get("mailboxes"), "total_weight": total_w}}

@@ -154,6 +154,23 @@ dialog::backdrop{background:#2424248c;transition:opacity .2s}
   button:active:not(:disabled){transform:none}
 }
 @media(max-width:900px){header{position:static}}
+
+/* ---- "why is it in this zone" hover card ---- */
+td.hv{cursor:help}
+td.hv:hover,td.hv:focus-visible{background:#f4f8ea}
+#whyTip{position:fixed;z-index:60;width:min(420px,calc(100vw - 16px));background:#fff;color:var(--ink);border:1px solid #d6d6d6;border-top:3px solid var(--green-brand);border-radius:10px;box-shadow:0 10px 30px #0003;padding:12px 14px;font-size:12.5px;pointer-events:none;opacity:0;transform:translateY(4px);transition:opacity .12s ease-out,transform .12s ease-out}
+#whyTip.on{opacity:1;transform:none}
+#whyTip p{margin:8px 0}
+#whyTip .big{font-family:var(--head);font-size:18px;margin-left:4px}
+#whyTip table{width:100%;border-collapse:collapse}
+#whyTip th{font-size:10.5px;padding:4px 6px}
+#whyTip td{padding:5px 6px;border-bottom:1px solid var(--line)}
+#whyTip tr:last-child td{border-bottom:0}
+#whyTip .n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+#whyTip .f{color:var(--mute);font-size:11.5px;font-weight:400}
+#whyTip tr.bad td{background:#fff6e5}
+#whyTip tr.bad td:last-child{color:var(--red);font-weight:600}
+@media (prefers-reduced-motion:reduce){#whyTip{transition:none;transform:none}}
 @media(max-width:1000px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2,.settings{grid-template-columns:1fr}.regions{grid-template-columns:repeat(2,1fr)}main{padding:14px 16px 40px}}
 @media(max-width:560px){.regions{grid-template-columns:1fr}.acct-table th:nth-child(5),.acct-table td:nth-child(5){display:none}}
 </style>
@@ -436,8 +453,50 @@ function trendCell(x){const t=x.trend;if(!t)return `<span class="muted small">bu
   const up=t.pp>=0.05,down=t.pp<=-0.05,col=up?"var(--red)":down?"var(--green)":"var(--mute)",arrow=up?"▲":down?"▼":"▬";
   const tip=`${t.days}-day change in the lifetime rate`+(x.recent_rate!=null?`; sends in that period bounced at ${x.recent_rate}%`:"");
   return `<span title="${esc(tip)}" style="color:${col};white-space:nowrap">${spark(x.spark)} ${arrow} ${t.pp>0?"+":""}${t.pp}</span>`}
+let whyData={};
+const SIGNALS={reply:"Reply rate",bounce:"Bounce rate",warmup:"Warm-up score",auth:"SPF / DKIM / DMARC / MX",volume:"Volume vs daily limit",positive:"Positive replies",complaints:"Spam complaints",blacklist:"Blacklists"};
+function signalFact(k,h){const i=h.inputs||{};
+  if(k==="reply")return i.reply_pct==null?"–":`${i.reply_pct}% (${fmt(i.replied)} of ${fmt(i.sent)} sent)${i.reply_goal?`, goal ${i.reply_goal}%+`:""}`;
+  if(k==="bounce")return i.bounce_pct==null?"–":`${i.bounce_pct}% (${fmt(i.bounced)} of ${fmt(i.sent)} sent)`;
+  if(k==="warmup")return i.warmup==null?"–":`${Math.round(i.warmup)} average, mailboxes with warm-up on`;
+  if(k==="auth"){const d=i.dns||{},miss=["spf","dkim","dmarc","mx"].filter(x=>!d[x]);return miss.length?`missing ${miss.map(x=>x.toUpperCase()).join(", ")}`:"all four present"}
+  if(k==="volume")return i.util==null?"–":`${Math.round(i.util*100)}% of the daily limit`;
+  return ""}
+function whyHtml(dom){
+  const h=whyData[dom];if(!h)return"";
+  const zn={healthy:"Healthy",watch:"Watch",danger:"Danger",retire:"Retire",new:"Too few sends"}[h.zone];
+  if(h.score==null)return `<b>${esc(dom)}</b><p>Not enough sends yet to score this domain.</p>`;
+  const f=h.factors||{},tw=Object.values(f).reduce((a,v)=>a+v.weight,0)||1;
+  const rows=Object.entries(f).map(([k,v])=>({k,v,lost:v.weight*(100-v.score)/tw,earned:v.weight*v.score/tw})).sort((a,b)=>b.lost-a.lost);
+  let head;
+  if((h.hard_fail||[]).length)head=`Sent straight to <b>Retire</b> by a hard-fail: ${esc(h.hard_fail.join("; "))}.`;
+  else if((h.capped||[]).length)head=`Held at <b>Danger</b> by a limit that caps the zone whatever the score: ${esc(h.capped.join("; "))}.`;
+  else{const zi={healthy:"75 or more",watch:"55 to 74",danger:"35 to 54",retire:"under 35"}[h.zone];
+    const next=h.zone==="danger"?55:h.zone==="watch"?75:h.zone==="retire"?35:null;
+    head=`Score <b>${h.score}</b> is in <b>${zn}</b> (${zi}).`+(next?` It needs <b>${(next-h.score).toFixed(1)}</b> more points to reach ${next===55?"Watch":next===75?"Healthy":"Danger"}.`:"")}
+  const tr=rows.map(r=>`<tr class="${r.lost>=5?"bad":""}"><td>${SIGNALS[r.k]||r.k}<div class="f">${esc(signalFact(r.k,h))}</div></td><td class="n">${r.v.score}</td><td class="n">${r.lost<0.05?"–":"−"+r.lost.toFixed(1)}</td></tr>`).join("");
+  return `<b>${esc(dom)}</b> <span class="pill ${h.zone}">${zn}</span> <b class="big">${h.score}</b>
+    <p>${head}</p>
+    <table><tr><th>Signal</th><th class="n">Score /100</th><th class="n">Points lost</th></tr>${tr}</table>
+    <p class="f">Window: ${h.basis==="lifetime"?"lifetime":"last "+(h.basis||"?")} · ${h.coverage}% of the weight measured.<br>Not scored: positive replies, spam complaints, blacklists.</p>`}
+(function(){
+  const tip=document.createElement("div");tip.id="whyTip";tip.setAttribute("role","tooltip");tip.hidden=true;document.body.appendChild(tip);
+  let cur=null;
+  function show(el){const dom=el.dataset.why;if(!whyData[dom])return;cur=el;tip.innerHTML=whyHtml(dom);tip.hidden=false;
+    const r=el.getBoundingClientRect(),tw=tip.offsetWidth,th=tip.offsetHeight;
+    let x=Math.min(Math.max(8,r.left),innerWidth-tw-8),y=r.bottom+6;if(y+th>innerHeight-8)y=Math.max(8,r.top-th-6);
+    tip.style.left=x+"px";tip.style.top=y+"px";tip.classList.add("on")}
+  function hide(){tip.classList.remove("on");tip.hidden=true;cur=null}
+  document.addEventListener("mouseover",e=>{const el=e.target.closest&&e.target.closest("[data-why]");if(el&&el!==cur)show(el);else if(!el&&!e.target.closest("#whyTip"))hide()});
+  document.addEventListener("focusin",e=>{const el=e.target.closest&&e.target.closest("[data-why]");if(el)show(el)});
+  document.addEventListener("focusout",hide);
+  document.addEventListener("keydown",e=>{if(e.key==="Escape")hide()});
+  document.addEventListener("scroll",hide,true);
+  document.addEventListener("click",e=>{const el=e.target.closest&&e.target.closest("[data-why]");if(el&&matchMedia("(hover:none)").matches)show(el)});
+})();
 function renderInbox(){
   const d=inboxData;if(!d)return;
+  whyData={};
   const b=[],ago0=d.sync&&d.sync.at?ago(d.sync.at):"not yet";
   if(!d.configured)b.push(["amber","No Bison key yet (BISON_KEY_VICTIG), so there is nothing to read."]);
   if(d.sync&&d.sync.error)b.push(["red",`The last sync failed: ${d.sync.error}`]);
@@ -457,9 +516,9 @@ function renderInbox(){
     const rl={critical:"Critical",warn:"Warning",ok:"OK",new:"Too few sends"}[x.reply_band];
     const h=x.health,zn={healthy:"Healthy",watch:"Watch",danger:"Danger",retire:"Retire",new:"Too few sends"}[h.zone];
     const why=[...(h.hard_fail||[]),...(h.capped||[])].join("; ")||(h.drag?`${h.drag.label} (-${h.drag.points})`:"–");
-    const tip=Object.entries(h.factors||{}).map(([k,v])=>`${k}: ${v.score}/100 (weight ${v.weight})`).join("\n")+`\nmeasured: ${h.coverage}% of weight, basis: ${h.basis||"–"}`;
     const ht=h.trend==null?"–":(h.trend>0?"+":"")+h.trend;
-    return `<tr><td><b>${esc(x.domain)}</b></td><td title="${esc(tip)}"><b>${h.score==null?"–":h.score}</b></td><td><span class="pill ${h.zone}">${zn}</span></td><td class="small">${esc(why)}</td><td>${ht}</td><td>${x.reply_band==="new"?`<span class="pill new">${rl}</span>`:`<span class="pill ${x.reply_band}" title="Lower is worse">${x.reply_rate}%</span>`}</td>
+    whyData[x.domain]=h;
+    return `<tr><td><b>${esc(x.domain)}</b></td><td class="hv" tabindex="0" data-why="${esc(x.domain)}"><b>${h.score==null?"–":h.score}</b></td><td class="hv" tabindex="0" data-why="${esc(x.domain)}"><span class="pill ${h.zone}">${zn}</span></td><td class="small hv" tabindex="0" data-why="${esc(x.domain)}">${esc(why)}</td><td>${ht}</td><td>${x.reply_band==="new"?`<span class="pill new">${rl}</span>`:`<span class="pill ${x.reply_band}" title="Lower is worse">${x.reply_rate}%</span>`}</td>
       <td>${fmt(x.replied||0)} <span class="muted small">of ${fmt(x.sent)}</span></td>
       <td>${x.band==="new"?`<span class="pill new">${label}</span>`:`<span class="pill ${x.band}">${x.rate}%</span>`}</td>
       <td>${fmt(x.bounced)} <span class="muted small">of ${fmt(x.sent)}</span></td>
@@ -467,7 +526,7 @@ function renderInbox(){
       <td>${trendCell(x)}</td><td>${x.warmup} <span class="muted small">warmup on</span></td><td>${esc(x.ht_status||"–")}</td><td class="muted small">${esc(x.created||"")}</td></tr>`}).join("");
   $("inboxTable").innerHTML=`<tr><th>Domain</th><th>Score</th><th>Zone</th><th>Top drag / reason</th><th>Score trend (7d)</th><th>Reply rate</th><th>Replies / sent</th><th>Lifetime bounce</th><th>Bounced / sent</th><th>Mailboxes connected</th><th>Trend (pts)</th><th>Warmup</th><th>Hypertide status</th><th>Ordered</th></tr>${rows||`<tr><td colspan="14" class="muted">Nothing matches.</td></tr>`}`;
   const w=d.weights||{};
-  $("inboxFoot").textContent=`Health score 0-100 = weighted average of what we can measure (${Object.entries(w).map(([k,v])=>k+" "+v).join(", ")}); signals we cannot read yet (spam complaints, blacklists) are left out, not counted as passes. Reply rate is judged against the team's 1% goal. Positive replies are not scored (they depend on the list and offer, not the domain), and the warm-up score only counts for mailboxes that still have warm-up switched on. Hard-fails (complaints 0.3%+, no SPF and DMARC, blacklist, 5%+ bounce in the window) go straight to Retire; 2%+ bounce caps at Danger. Windows: last 7 days, then 14, then lifetime, and each needs ${d.window_min_sends||200}+ sends. Hover a score for the breakdown. Reply rate = replies ÷ sends for the whole domain (the headline signal: lower is worse; judged once it has ${d.reply_min_sends}+ sends; under ${d.reply_warn_pct}% warning, under ${d.reply_crit_pct}% critical). Sorted worst score first. Lifetime bounce = bounced ÷ sent, judged once it has ${d.min_sends}+ sends. Trend = change in the lifetime rate over about 7 days, from a daily snapshot (it builds up from the first sync). Read-only: nothing is paused, bought or swapped from this tab yet.`+(d.hypertide?"":" (Hypertide key not set: status column empty.)");
+  $("inboxFoot").textContent=`Health score 0-100 = weighted average of what we can measure (${Object.entries(w).map(([k,v])=>k+" "+v).join(", ")}); signals we cannot read yet (spam complaints, blacklists) are left out, not counted as passes. Reply rate is judged against the team's 1% goal. Positive replies are not scored (they depend on the list and offer, not the domain), and the warm-up score only counts for mailboxes that still have warm-up switched on. Hard-fails (complaints 0.3%+, no SPF and DMARC, blacklist, 5%+ bounce in the window) go straight to Retire; 2%+ bounce caps at Danger. Windows: last 7 days, then 14, then lifetime, and each needs ${d.window_min_sends||200}+ sends. Hover a domain's score, zone or reason to see exactly why it is there. Reply rate = replies ÷ sends for the whole domain (the headline signal: lower is worse; judged once it has ${d.reply_min_sends}+ sends; under ${d.reply_warn_pct}% warning, under ${d.reply_crit_pct}% critical). Sorted worst score first. Lifetime bounce = bounced ÷ sent, judged once it has ${d.min_sends}+ sends. Trend = change in the lifetime rate over about 7 days, from a daily snapshot (it builds up from the first sync). Read-only: nothing is paused, bought or swapped from this tab yet.`+(d.hypertide?"":" (Hypertide key not set: status column empty.)");
 }
 function renderChart(){
   const keys=S.accounts.map(a=>a.key), days=[];
