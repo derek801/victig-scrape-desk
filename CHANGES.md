@@ -26,6 +26,7 @@ Rules that came from a person and still hold. Change one only when its owner say
 
 Newest first. One line per change: date, PR, who asked, what changed and why.
 
+- 2026-11-24 · #41 · Max · The Clay tables list at the bottom of Scrape Desk shows only tables for accounts that are switched on; turning an account off hides its table (and clears its Clay-full alerts), turning one on shows it right away. Why: a paused rep's table is noise; the list should follow who is scraping.
 - 2026-11-24 · #40 · Max · Launches per account per day is now 1 (was 3), including the saved setting on the live desk (changed once at startup; it can still be raised on the Settings fold). Why: a second run that does not reach the 2,000 budget is not worth the risk to the LinkedIn account's reputation; Derek's account had just been disconnected by LinkedIn.
 - 2026-11-23 · #39 · Max · Layout: the stat tiles on both pages moved from a row across the top to a column down the left side (sticky while scrolling; stacks above the content on narrow screens). The Sending domains table on Inbox Health is now a dropdown, closed by default, to save space. Why: Max asked for both to save vertical space.
 - 2026-11-23 · #38 · Max · County map: hovering a county shows a card with the county and state, the date it was last scraped (and how many days ago) and its region, replacing the slow browser tooltip. `/api/coverage` now also returns the last-scraped timestamp. Why: the map only said "scraped N days ago" after a long hover delay and gave no date.

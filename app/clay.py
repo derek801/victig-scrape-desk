@@ -47,8 +47,10 @@ def per_working_day(key):
 
 
 def overview():
+    """Active tables of accounts that are switched on; a paused account's table is hidden (and not alerted on)."""
     out = []
-    for t in store.q("SELECT * FROM clay_tables WHERE active=1 ORDER BY account_key"):
+    for t in store.q("SELECT t.* FROM clay_tables t JOIN accounts a ON a.key=t.account_key "
+                     "WHERE t.active=1 AND a.enabled=1 ORDER BY t.account_key"):
         rows, lim = rows_used(t), t["row_limit"] or LIMIT
         pct = round(rows / lim * 100, 1) if rows is not None else None
         rate = per_working_day(t["account_key"])
@@ -78,6 +80,9 @@ def check():
     ensure()
     state = store.kv_get("clay_levels", {})
     holds = store.kv_get("clay_holds", {})
+    for t in store.q("SELECT t.id FROM clay_tables t JOIN accounts a ON a.key=t.account_key WHERE a.enabled=0"):
+        _clear_levels(t["id"])                   # account paused: its table's alerts are cleared, not left open
+        state.pop(str(t["id"]), None)
     for t in overview():
         now_held = held(t["account_key"])
         if now_held != bool(holds.get(t["account_key"])):
