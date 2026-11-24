@@ -18,6 +18,7 @@ Rules that came from a person and still hold. Change one only when its owner say
   (Derek, 2026-10-13; see CLAUDE.md)
 - **The site never posts to Chat or Slack.** Notifications go through the Make "RevOps Daily Connection
   Check", which reads `/api/check`. (Max, 2026-11-09, #13)
+- **One scrape run per account per day.** A short second run is not worth the risk to the account. (Max, 2026-11-24, #40)
 - **Rotation reacts to lasting problems, not quiet weeks.** The score uses lifetime numbers; the recent window is information, except bounce spikes and hard-fails. (Max, 2026-11-23, #37)
 - **VICTIG brand look** (Poppins/Ubuntu, #333 + #84B637 green). Keep new UI in it. (Max, 2026-11-19, #33)
 
@@ -25,6 +26,7 @@ Rules that came from a person and still hold. Change one only when its owner say
 
 Newest first. One line per change: date, PR, who asked, what changed and why.
 
+- 2026-11-24 · #40 · Max · Launches per account per day is now 1 (was 3), including the saved setting on the live desk (changed once at startup; it can still be raised on the Settings fold). Why: a second run that does not reach the 2,000 budget is not worth the risk to the LinkedIn account's reputation; Derek's account had just been disconnected by LinkedIn.
 - 2026-11-23 · #39 · Max · Layout: the stat tiles on both pages moved from a row across the top to a column down the left side (sticky while scrolling; stacks above the content on narrow screens). The Sending domains table on Inbox Health is now a dropdown, closed by default, to save space. Why: Max asked for both to save vertical space.
 - 2026-11-23 · #38 · Max · County map: hovering a county shows a card with the county and state, the date it was last scraped (and how many days ago) and its region, replacing the slow browser tooltip. `/api/coverage` now also returns the last-scraped timestamp. Why: the map only said "scraped N days ago" after a long hover delay and gave no date.
 - 2026-11-23 · #37 · Max · Health score and zone now come from lifetime numbers; the last 7-14 days is shown on the hover card for information, and only a bounce spike in it (2%+ caps at Danger, 5%+ retires) can change the zone. Why: victigbackgroundhelp.com (1.6% lifetime reply, 1.2% bounce, warm-up 96) fell to Danger at 53.8 on a quiet week, and a quiet week must not get a good domain swapped out for a bench domain. Standing rule: recent dips inform, they do not trigger rotation.

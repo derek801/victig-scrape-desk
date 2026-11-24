@@ -61,7 +61,7 @@ DEFAULT_SETTINGS = {
     "window_start": "09:00",      # local launch window (APP_TZ)
     "window_end": "15:30",
     "weekdays_only": True,
-    "max_launches_per_day": 3,
+    "max_launches_per_day": 1,    # one run a day: a short second run is not worth the risk to the account (Max, 2026-11-24)
     "regap_days": 30,             # a region restarts from the top only if its last cycle began this long ago
     "inbox_min_sends": 100,       # a domain is judged on lifetime bounce rate once it has this many sends
     "inbox_warn_pct": 2.0,        # Bison: 2-3% is the warning zone ...

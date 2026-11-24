@@ -109,8 +109,15 @@ check(len(done) == 5, f"5 slices done ({len(done)})")
 n, got = runner.account_today("max")
 check(got >= 1500 and n == 1, f"max today: {n} launch, {got} profiles")
 
-# 3. overflow -> split into two pending children right behind it (budget raised so a 2nd run fits)
+# 2b. one run a day by default: even with budget left, there is no second run
+check(store.settings()["max_launches_per_day"] == 1, "default is one launch per account per day")
 store.x("UPDATE accounts SET daily_budget=6000")
+force_due()
+runner.tick()
+check(len(store.q("SELECT * FROM runs WHERE source='desk' AND status='launched'")) == 0, "no second run the same day with the default limit")
+
+# 3. overflow -> split into two pending children right behind it (limit raised and budget raised so a 2nd run fits)
+store.save_settings({"max_launches_per_day": 3})
 force_due()
 runner.tick()
 finish_all(total=4000)
