@@ -28,6 +28,11 @@ GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"
 def _startup():
     store.init()
     seed.seed()
+    if not store.kv_get("mig_one_run_per_day"):        # one time: a saved higher limit drops to 1; later edits stick
+        store.kv_set("mig_one_run_per_day", True)
+        if store.settings()["max_launches_per_day"] > 1:
+            store.save_settings({"max_launches_per_day": 1})
+            store.log("Launches per account per day set to 1 (a run that ends under the daily budget does not get a second run)")
     clay.ensure()
     if config.RUN_SCHEDULER:
         runner.start()
