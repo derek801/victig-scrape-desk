@@ -417,6 +417,7 @@ def set_account(key: str, request: Request, patch: dict = Body(...)):
         raise HTTPException(404)
     if "enabled" in patch:
         store.x("UPDATE accounts SET enabled=? WHERE key=?", (1 if patch["enabled"] else 0, key))
+        clay.ensure()                                  # a newly switched-on account gets its Clay table right away
     if "region_id" in patch:
         store.x("UPDATE accounts SET region_id=? WHERE key=?", (patch["region_id"] or None, key))
     if "daily_budget" in patch:

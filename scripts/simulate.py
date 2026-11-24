@@ -294,6 +294,11 @@ store.x("DELETE FROM runs WHERE account_key='max' AND source='desk'")
 check(not runner.due(store.q1("SELECT * FROM accounts WHERE key='max'")), "held account is not due")
 clay.update(t2["id"], {"rows": 100})
 check(not clay.held("max") and runner.due(store.q1("SELECT * FROM accounts WHERE key='max'")), "hold lifts once the count is back down")
+store.x("UPDATE accounts SET enabled=0 WHERE key='blake'")
+check("blake" not in {x["account_key"] for x in clay.overview()} and "max" in {x["account_key"] for x in clay.overview()},
+      "a paused account's Clay table is hidden; the others stay")
+store.x("UPDATE accounts SET enabled=1 WHERE key='blake'")
+check("blake" in {x["account_key"] for x in clay.overview()}, "switching the account back on shows its table again")
 
 # 14b. a run PhantomBuster never ends (it showed "running" for five days) is cleared by the watchdog, not waited on forever
 finish_all(total=1500)
